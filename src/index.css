@@ -1,0 +1,81 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Deep slate dark theme with a financial-blue accent */
+    --background: 222 24% 6%;
+    --foreground: 210 20% 92%;
+
+    --card: 222 22% 9%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 222 24% 8%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 201 90% 43%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 217 19% 16%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 217 19% 14%;
+    --muted-foreground: 215 14% 58%;
+
+    --accent: 217 19% 18%;
+    --accent-foreground: 210 20% 96%;
+
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 217 19% 18%;
+    --input: 217 19% 18%;
+    --ring: 201 90% 50%;
+
+    --gain: 158 64% 42%;
+    --loss: 0 72% 51%;
+    --brand: 201 90% 43%;
+
+    --radius: 0.6rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1;
+  }
+  /* Numeric tabular alignment for financial figures */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+  .glass {
+    background: linear-gradient(
+      180deg,
+      hsl(222 22% 11% / 0.7),
+      hsl(222 24% 8% / 0.7)
+    );
+    backdrop-filter: blur(12px);
+  }
+}
