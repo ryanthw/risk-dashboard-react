@@ -1,0 +1,7 @@
+# Minimal Supabase CLI config. Link to your project with:
+#   supabase link --project-ref YOUR_PROJECT_REF
+project_id = "risk-dashboard-react"
+
+[functions.market-data]
+# Requires a logged-in user (valid JWT) to invoke.
+verify_jwt = true
