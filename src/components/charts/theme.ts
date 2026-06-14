@@ -8,8 +8,8 @@ export const CHART_COLORS = {
   brand: "#1f9bdb",
   gain: "#2bb789",
   loss: "#e15554",
-  amber: "#e0a82e",
-  violet: "#8b7cf6",
+  amber: "#d9a441",
+  violet: "#5d6fd1",
   grid: "rgba(148,163,184,0.12)",
   zeroLine: "rgba(148,163,184,0.35)",
   text: "#c7d0dc",
@@ -17,21 +17,21 @@ export const CHART_COLORS = {
 };
 
 /**
- * Categorical color sequence for multi-series charts. Anchored on the brand
- * blue and kept cool/harmonious with the slate theme — blues, teals, cyan and
- * indigo lead, with amber/rose reserved as later-index accents.
+ * Categorical color sequence for multi-series charts. Industrial blue / steel /
+ * white ramp matching the site's dark financial theme — no pastels. Ordered to
+ * alternate light/dark/blue so adjacent slices and bars stay distinguishable.
  */
 export const CHART_SEQUENCE = [
   "#1f9bdb", // brand blue
-  "#2bb789", // emerald (gain)
-  "#38bdf8", // sky
-  "#8b7cf6", // violet
-  "#22d3ee", // cyan
-  "#5e8bff", // periwinkle
-  "#2dd4bf", // teal
-  "#e0a82e", // amber accent
-  "#f4799e", // rose accent
-  "#94a3b8", // slate
+  "#dfe7ef", // near-white steel
+  "#15527d", // deep navy
+  "#5fa8d6", // soft mid blue
+  "#3f5871", // slate steel
+  "#0ea5e9", // sky blue
+  "#9fb1c4", // light steel
+  "#0b3a5c", // darkest navy
+  "#6b7f95", // muted steel
+  "#2b6cb0", // royal blue
 ];
 
 /** Base dark layout merged into every chart. */
