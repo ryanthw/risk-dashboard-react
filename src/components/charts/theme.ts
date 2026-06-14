@@ -1,30 +1,37 @@
 import type { Layout, Config } from "plotly.js-dist-min";
 
-/** Shared brand palette for charts. */
+/**
+ * Shared brand palette for charts, aligned with the app's deep-slate +
+ * financial-blue UI tokens (--primary / --gain / --loss in index.css).
+ */
 export const CHART_COLORS = {
-  brand: "#1499d6",
-  gain: "#22c08a",
-  loss: "#e0524d",
+  brand: "#1f9bdb",
+  gain: "#2bb789",
+  loss: "#e15554",
   amber: "#e0a82e",
-  violet: "#7c6cf0",
+  violet: "#8b7cf6",
   grid: "rgba(148,163,184,0.12)",
   zeroLine: "rgba(148,163,184,0.35)",
   text: "#c7d0dc",
   muted: "#7a8699",
 };
 
-/** Categorical color sequence for multi-series charts. */
+/**
+ * Categorical color sequence for multi-series charts. Anchored on the brand
+ * blue and kept cool/harmonious with the slate theme — blues, teals, cyan and
+ * indigo lead, with amber/rose reserved as later-index accents.
+ */
 export const CHART_SEQUENCE = [
-  "#1499d6",
-  "#22c08a",
-  "#e0a82e",
-  "#7c6cf0",
-  "#e0524d",
-  "#2dd4bf",
-  "#f472b6",
-  "#a3e635",
-  "#fb923c",
-  "#60a5fa",
+  "#1f9bdb", // brand blue
+  "#2bb789", // emerald (gain)
+  "#38bdf8", // sky
+  "#8b7cf6", // violet
+  "#22d3ee", // cyan
+  "#5e8bff", // periwinkle
+  "#2dd4bf", // teal
+  "#e0a82e", // amber accent
+  "#f4799e", // rose accent
+  "#94a3b8", // slate
 ];
 
 /** Base dark layout merged into every chart. */
