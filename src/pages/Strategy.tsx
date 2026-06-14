@@ -181,10 +181,13 @@ export default function Strategy() {
             data={[
               {
                 type: "treemap",
-                branchvalues: "remainder",
+                branchvalues: "total",
                 labels: [...sectors, ...tickers],
                 parents: [...sectors.map(() => ""), ...tickers.map((t) => agg.byTicker[t].sector)],
-                values: [...sectors.map(() => 0), ...tickers.map((t) => agg.byTicker[t].risk)],
+                values: [
+                  ...sectors.map((s) => agg.bySector[s]),
+                  ...tickers.map((t) => agg.byTicker[t].risk),
+                ],
                 marker: { colors: CHART_SEQUENCE },
                 textinfo: "label+value",
                 hovertemplate: "<b>%{label}</b><br>$%{value:,.0f}<extra></extra>",
