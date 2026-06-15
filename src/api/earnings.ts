@@ -16,6 +16,7 @@ export interface ButterflyLeg {
 
 export interface ScanCandidate {
   ticker: string;
+  hasHistory: boolean;
   earningsDate: string;
   when: "AMC" | "BMO" | "DMH" | "—";
   spot: number;
