@@ -279,11 +279,19 @@ Deno.serve(async (req) => {
     const from = today.toISOString().slice(0, 10);
     const to = new Date(today.getTime() + days * 86400000).toISOString().slice(0, 10);
 
-    const [cal, relRows] = await Promise.all([
-      earningsCalendar(from, to),
-      sb.from("earnings_reliability").select("*"),
-    ]);
-    const relMap = new Map<string, any>((relRows.data ?? []).map((r: any) => [r.ticker, r]));
+    // PostgREST caps each response at 1000 rows, so page through the reliability table.
+    async function allReliability() {
+      const out: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data } = await sb.from("earnings_reliability").select("*").range(from, from + 999);
+        if (!data || data.length === 0) break;
+        out.push(...data);
+        if (data.length < 1000) break;
+      }
+      return out;
+    }
+    const [cal, relAll] = await Promise.all([earningsCalendar(from, to), allReliability()]);
+    const relMap = new Map<string, any>(relAll.map((r: any) => [r.ticker, r]));
 
     // De-dupe by symbol. Include the WHOLE calendar (not just the researched
     // universe) so every upcoming earnings can surface, but prioritise: all names
