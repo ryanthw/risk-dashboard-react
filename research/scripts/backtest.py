@@ -33,13 +33,26 @@ cw = df.ic_credit / df.ic_width
 df["ic_ok"] = (df.ic_width > 0) & np.isfinite(df.ic_width) & (df.scK < df.lcK) & (df.spK > df.lpK) & cw.between(0.02, 0.70)
 df.loc[~df.ic_ok, ["ic_pnl", "ic_maxloss"]] = np.nan
 
+# iron butterfly: short ATM straddle body, long d5 wings (the "defined-risk straddle")
+df["ibf_credit"] = (df.e_atm_c + df.e_atm_p) - (df.e_lc + df.e_lp)
+df["ibf_exit"]   = (df.x_atm_c + df.x_atm_p) - (df.x_lc + df.x_lp)
+df["ibf_pnl"]    = df.ibf_credit - df.ibf_exit
+df["ibf_width"]  = np.maximum(df.lcK - df.atmK, df.atmK - df.lpK)
+df["ibf_maxloss"] = (df.ibf_width - df.ibf_credit).clip(lower=0.01)
+cwf = df.ibf_credit / df.ibf_width
+df["ibf_ok"] = (df.ibf_width > 0) & np.isfinite(df.ibf_width) & (df.atmK < df.lcK) & (df.atmK > df.lpK) & cwf.between(0.05, 0.95)
+df.loc[~df.ibf_ok, ["ibf_pnl", "ibf_maxloss"]] = np.nan
+
 # normalizations
 df["implied_move"] = df.straddle_credit / df.spot           # implied move to expiration
 df["imp_minus_act"] = df.implied_move - df.abs_c2c          # raw edge proxy
 df["straddle_ret_prem"] = df.straddle_pnl / df.straddle_credit
 df["strangle_ret_prem"] = df.strangle_pnl / df.strangle_credit
-df["ic_ror"] = df.ic_pnl / df.ic_maxloss                    # return on defined risk
+df["ic_ror"] = df.ic_pnl / df.ic_maxloss                    # condor return on defined risk
+df["ibf_ror"] = df.ibf_pnl / df.ibf_maxloss                 # butterfly return on defined risk
 df["straddle_ret_notional"] = df.straddle_pnl / df.spot     # P&L per $ of underlying
+MARGIN = 0.18                                                # naked-straddle margin proxy (% notional)
+df["straddle_ror"] = df.straddle_pnl / (MARGIN * df.spot)   # naked return on capital-at-risk
 
 # --- merge each name's trailing average realized move (the scanner's benchmark) ---
 pe = pd.read_parquet(os.path.join(OUT, "per_event.parquet")).sort_values(["ticker","earnings_date"])
@@ -72,20 +85,22 @@ print(f"Actual |c2c| move:            mean={df.abs_c2c.mean()*100:.2f}%  median=
 print(f"P(implied > actual) = {(df.implied_move > df.abs_c2c).mean()*100:.1f}%")
 print(f"Mean ratio implied/actual = {(df.implied_move/df.abs_c2c.clip(lower=1e-4)).median():.2f} (median)\n")
 
-print("=== P&L BY STRUCTURE (per-trade, in % of premium or risk) ===")
+print("=== P&L BY STRUCTURE (per-trade, in % of premium or defined risk) ===")
 stats(df.straddle_ret_prem, "Short straddle (%prem)")
 stats(df.strangle_ret_prem, "Short strangle d16 (%prem)")
-stats(df.ic_ror,            "Iron condor (%risk)")
+stats(df.ibf_ror,           "Iron BUTTERFLY ATM/d5 (%risk)")
+stats(df.ic_ror,            "Iron CONDOR d16/d5 (%risk)")
 print()
 print("=== CLEANEST EXIT: T+1 only (real next-day chain; best proxy for actual strategy) ===")
 d1 = df[df.exit_lag == 1]
 stats(d1.straddle_ret_prem, "T+1 straddle (%prem)")
 stats(d1.strangle_ret_prem, "T+1 strangle (%prem)")
-stats(d1.ic_ror,            "T+1 iron condor (%risk)")
+stats(d1.ibf_ror,           "T+1 iron BUTTERFLY (%risk)")
+stats(d1.ic_ror,            "T+1 iron CONDOR (%risk)")
 print()
-print("=== P&L BY STRUCTURE (per-trade, in % of underlying notional) ===")
+print("=== P&L BY STRUCTURE (per-trade, in % of underlying notional — common base) ===")
 stats(df.straddle_ret_notional, "Short straddle ($/notional)")
-stats(df.strangle_pnl/df.spot,  "Short strangle ($/notional)")
+stats(df.ibf_pnl/df.spot,       "Iron butterfly ($/notional)")
 stats(df.ic_pnl/df.spot,        "Iron condor ($/notional)")
 
 # ---- equity curve: equal $-risk per trade, aggregated by day ----
@@ -99,6 +114,7 @@ def equity(col_pnl, col_norm, name):
     return daily
 
 q_str = equity("straddle_pnl", "straddle_credit", "Straddle (%prem, eq-wt/Q)")
+q_ibf = equity("ibf_pnl", "ibf_maxloss", "Iron butterfly (%risk, eq-wt/Q)")
 q_ic  = equity("ic_pnl", "ic_maxloss", "Iron condor (%risk, eq-wt/Q)")
 
 # ---- predictive factors (straddle %prem as target) ----
@@ -125,14 +141,14 @@ print((df.groupby("sector")["straddle_ret_prem"].agg(["mean","count"]).sort_valu
 print("\nBy timing:")
 print((df.groupby("timing")["straddle_ret_prem"].agg(["mean","count"])).round(3).to_string())
 
-print("\n=== ROBUSTNESS BY YEAR (straddle %prem & iron condor %risk) ===")
+print("\n=== ROBUSTNESS BY YEAR (mean per-trade return; 3 structures) ===")
 df["year"] = df.earnings_date.dt.year
 yr = df.groupby("year").agg(n=("straddle_ret_prem","size"),
-                            straddle_mean=("straddle_ret_prem","mean"),
-                            straddle_win=("straddle_ret_prem", lambda s:(s>0).mean()),
-                            ic_mean=("ic_ror","mean"))
-print((yr.assign(straddle_mean=yr.straddle_mean.round(3), straddle_win=(yr.straddle_win*100).round(0),
-                 ic_mean=yr.ic_mean.round(3))).to_string())
+                            straddle_prem=("straddle_ret_prem","mean"),
+                            butterfly_ror=("ibf_ror","mean"),
+                            condor_ror=("ic_ror","mean"))
+print((yr.assign(straddle_prem=yr.straddle_prem.round(3), butterfly_ror=yr.butterfly_ror.round(3),
+                 condor_ror=yr.condor_ror.round(3))).to_string())
 
 print("\n=== EXIT-LAG SENSITIVITY (real exit day used) ===")
 print((df.groupby("exit_lag")["straddle_ret_prem"].agg(["mean","count"])).round(3).to_string())
@@ -144,7 +160,8 @@ for s in ["imp_minus_act","imem_vs_avg","imem_ratio","implied_move","atm_iv","dt
 
 # ---- Kelly inputs from straddle and IC ----
 print("\n=== POSITION SIZING INPUTS ===")
-for name, ror in [("Iron condor (ret/risk)", df.ic_ror.dropna()),
+for name, ror in [("Iron butterfly (ret/risk)", df.ibf_ror.dropna()),
+                  ("Iron condor (ret/risk)", df.ic_ror.dropna()),
                   ("Straddle (ret/premium)", df.straddle_ret_prem.dropna())]:
     mu, sd = ror.mean(), ror.std()
     # full-Kelly for continuous returns ~ mu/var (in units of the bet's unit-risk)
@@ -156,5 +173,6 @@ for name, ror in [("Iron condor (ret/risk)", df.ic_ror.dropna()),
 
 df.to_parquet(os.path.join(OUT, "trades_enriched.parquet"), index=False)
 q_str.to_csv(os.path.join(OUT, "equity_straddle_Q.csv"))
+q_ibf.to_csv(os.path.join(OUT, "equity_butterfly_Q.csv"))
 q_ic.to_csv(os.path.join(OUT, "equity_ic_Q.csv"))
 print("\nsaved trades_enriched.parquet + quarterly equity csvs")
