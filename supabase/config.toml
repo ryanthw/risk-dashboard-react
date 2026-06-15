@@ -5,3 +5,7 @@ project_id = "risk-dashboard-react"
 [functions.market-data]
 # Requires a logged-in user (valid JWT) to invoke.
 verify_jwt = true
+
+[functions.earnings-scanner]
+# Requires a logged-in user (valid JWT) to invoke.
+verify_jwt = true

@@ -6,6 +6,7 @@ import {
   Target,
   History as HistoryIcon,
   FlaskConical,
+  Radar,
   LogOut,
   TrendingUp,
   UserCog,
@@ -21,6 +22,7 @@ const nav = [
   { to: "/strategy", label: "Strategy", icon: Target },
   { to: "/history", label: "History", icon: HistoryIcon },
   { to: "/analysis", label: "Trade Analysis", icon: FlaskConical },
+  { to: "/scanner", label: "Earnings Scanner", icon: Radar },
 ];
 
 export function Sidebar() {
