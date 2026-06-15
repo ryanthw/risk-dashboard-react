@@ -22,7 +22,7 @@ const CBOE = "https://cdn.cboe.com/api/global/delayed_quotes/options";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const CACHE_TTL_MS = 20 * 60 * 1000;       // 20 min
-const MAX_CANDIDATES = 28;                  // cap live option-chain fetches per scan
+const MAX_CANDIDATES = 50;                  // cap live option-chain fetches per scan
 const WING_DELTA = 0.10;                     // long-wing target |delta| (defined risk)
 
 const corsHeaders = {
@@ -176,16 +176,33 @@ async function buildCandidate(sym: string, earnDateISO: string, hour: string, re
   const atmIv = (bodyC.iv + bodyP.iv) / 2;
   const liq = (bodyC.vol + bodyP.vol) + 0.2 * (bodyC.oi + bodyP.oi);
 
-  // DTE-robust richness: live implied move vs the move you'd EXPECT to the same
-  // expiry = sqrt(earnings_jump^2 + diffusion over the non-event days). This makes
-  // a 2-DTE front-week and a 31-DTE monthly directly comparable.
-  const jump = rel?.avg_actual > 0 ? rel.avg_actual : impliedMove;
-  const baseVol = await recentDailyVol(sym);
-  const expMove = Math.sqrt(jump * jump + baseVol * baseVol * Math.max(0, dteDays - 1));
-  const richness = expMove > 0 ? impliedMove / expMove : null;
+  // back-month ATM IV (>= ~2 weeks past the front expiry) for the IV term structure
+  const backExp = exps.find((e) => e >= targetExp + 14 * 86400);
+  let backIv: number | null = null;
+  if (backExp) {
+    const bc = nearestStrike(chain.calls.filter((c) => c.expUnix === backExp && c.iv > 0), spot);
+    const bp = nearestStrike(chain.puts.filter((p) => p.expUnix === backExp && p.iv > 0), spot);
+    if (bc && bp) backIv = (bc.iv + bp.iv) / 2;
+  }
+
+  // Richness. With history: DTE-robust = live implied move vs the move you'd EXPECT
+  // to the same expiry (sqrt(earnings_jump^2 + diffusion over non-event days)) — makes
+  // a 2-DTE front-week and a 31-DTE monthly comparable. Without history: fall back to
+  // the live IV term-structure premium (front ATM IV / back-month ATM IV); >1 means the
+  // event is bid up. Two different scales, but no-history names live in their own list.
+  const hasHistory = rel != null && rel.n != null;
+  let richness: number | null;
+  if (hasHistory && rel.avg_actual > 0) {
+    const baseVol = await recentDailyVol(sym);
+    const expMove = Math.sqrt(rel.avg_actual ** 2 + baseVol * baseVol * Math.max(0, dteDays - 1));
+    richness = expMove > 0 ? impliedMove / expMove : null;
+  } else {
+    richness = backIv && backIv > 0 ? atmIv / backIv : null;
+  }
 
   // ---- confidence score (0-100) from research flags ----
-  const richC = richness != null ? clamp((richness - 1.0) / 0.4) : 0.4;          // 1.0->0 .. 1.4->1
+  const richSpread = hasHistory ? 0.4 : 0.6;                                      // no-history ratios run wider
+  const richC = richness != null ? clamp((richness - 1.0) / richSpread) : 0.35;
   const histC = rel?.fly_win != null ? clamp((rel.fly_win - 0.4) / 0.4) : 0.3;   // 40%->0 .. 80%->1
   const ivC = clamp((atmIv - 0.3) / 0.5);                                         // 30%->0 .. 80%->1
   const nC = rel?.n != null ? clamp(rel.n / 12) : 0;
@@ -201,6 +218,7 @@ async function buildCandidate(sym: string, earnDateISO: string, hour: string, re
 
   return {
     ticker: sym,
+    hasHistory,
     earningsDate: earnDateISO,
     when: hour === "amc" ? "AMC" : hour === "bmo" ? "BMO" : hour === "dmh" ? "DMH" : "—",
     spot: +spot.toFixed(2),
@@ -267,14 +285,20 @@ Deno.serve(async (req) => {
     ]);
     const relMap = new Map<string, any>((relRows.data ?? []).map((r: any) => [r.ticker, r]));
 
-    // de-dupe by symbol, keep only researched universe, cap candidate count
+    // De-dupe by symbol. Include the WHOLE calendar (not just the researched
+    // universe) so every upcoming earnings can surface, but prioritise: all names
+    // with backtested history first, then analyst-covered names (a free proxy for
+    // having liquid options), capped to bound live option-chain fetches.
     const seen = new Set<string>();
-    const candidates = cal
-      .filter((e) => e.symbol && relMap.has(e.symbol) && !seen.has(e.symbol) && (seen.add(e.symbol), true))
-      .slice(0, MAX_CANDIDATES);
+    const uniq = cal.filter((e) => e.symbol && !seen.has(e.symbol) && (seen.add(e.symbol), true));
+    const withHist = uniq.filter((e) => relMap.has(e.symbol));
+    const noHist = uniq
+      .filter((e) => !relMap.has(e.symbol))
+      .sort((a, b) => (a.epsEstimate != null ? 0 : 1) - (b.epsEstimate != null ? 0 : 1));
+    const candidates = [...withHist, ...noHist].slice(0, MAX_CANDIDATES);
 
     const built = await pool(candidates, 5, async (e) => {
-      try { return await buildCandidate(e.symbol, e.date, e.hour, relMap.get(e.symbol)); }
+      try { return await buildCandidate(e.symbol, e.date, e.hour, relMap.get(e.symbol) ?? null); }
       catch { return null; }
     });
     const results = built.filter((x): x is NonNullable<typeof x> => x != null)
