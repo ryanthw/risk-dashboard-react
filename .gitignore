@@ -14,8 +14,11 @@ dist-ssr
 # Reference Streamlit app — not part of the React build
 Risk Dashboard Final/
 
-# Research scratch (not committed)
-research/
+# Research: track the reproducible pipeline (scripts + report), ignore the heavy
+# data/artifacts (parquet caches, charts, logs, generated symbol lists).
+research/data/
+research/out/
+research/**/__pycache__/
 
 # Supabase CLI local state (regenerated on link)
 supabase/.temp/

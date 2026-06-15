@@ -1,0 +1,14 @@
+-- ============================================================================
+-- Earnings reliability — expanded universe (1104 names).
+-- Regenerated from the DoltHub option backtest over the full ~2,282-symbol
+-- universe (S&P 500 + the rest of the DoltHub option universe), real-data-only,
+-- T+1..T+3 exits, >=3 valid events per name. Idempotent upsert — safe to re-run.
+-- Regenerate via research/scripts/gen_reliability_migration.py.
+-- ============================================================================
+-- Seed rows for this table live in the private research repo
+-- (ryanthw/research-sandbox, db/seeds/). They are research output, and the
+-- research side is their only write path. This repo owns the schema and the
+-- select-only read policy; it never writes these rows.
+--
+-- Self-hosting: the table is created empty and the dependent scanner will
+-- return nothing until you populate it with your own data.
