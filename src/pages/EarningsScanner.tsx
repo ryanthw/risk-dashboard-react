@@ -159,8 +159,10 @@ export default function EarningsScanner() {
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             Max gain/loss are per 1 contract (×100). Enter ~5 min before the close on the day
             before the print; exit ~15–30 min after the next open. Size each at 1–3% of equity as
-            defined max-loss and spread across many names. Implied move is live (~15-min delayed);
-            historical move &amp; win-rate are from the S&amp;P 500 backtest (2020–2025).
+            defined max-loss and spread across many names. Implied move &amp; strikes are live CBOE
+            options (~15-min delayed) — confirm fills in your broker. Richness compares the implied
+            move to the expected move at that expiry; historical move &amp; win-rate are from the
+            S&amp;P 500 backtest (2020–2025).
           </p>
         </div>
       )}
