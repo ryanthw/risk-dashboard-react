@@ -2,9 +2,10 @@
 // Ranks upcoming earnings as short iron-butterfly candidates.
 //   1. Finnhub earnings calendar -> upcoming events (date + AMC/BMO).
 //   2. Restrict to the researched universe (earnings_reliability table).
-//   3. Live Yahoo option chain (front expiry AFTER the print) -> implied move,
-//      ATM short straddle body + ~delta10 long wings = iron butterfly, with
-//      credit / max-loss / max-gain / breakevens.
+//   3. Live CBOE delayed option chain (front expiry AFTER the print) -> implied
+//      move, ATM short straddle body + ~delta10 long wings = iron butterfly,
+//      with credit / max-loss / max-gain / breakevens. CBOE provides greeks
+//      (delta) directly, so wing selection needs no Black-Scholes.
 //   4. Join historical reliability (fly win-rate, premium richness, sample size).
 //   5. Confidence score from the research flags; rank best-first.
 // Results are cached (earnings_scan_cache) so the page loads instantly; the UI
@@ -17,12 +18,11 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const FINNHUB_KEY = Deno.env.get("FINNHUB_API_KEY") ?? "";
 const FINNHUB = "https://finnhub.io/api/v1";
-const YOPT = "https://query1.finance.yahoo.com/v7/finance/options";
+const CBOE = "https://cdn.cboe.com/api/global/delayed_quotes/options";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const RISK_FREE = 0.04;
 const CACHE_TTL_MS = 20 * 60 * 1000;       // 20 min
-const MAX_CANDIDATES = 28;                  // cap live Yahoo calls per scan
+const MAX_CANDIDATES = 28;                  // cap live option-chain fetches per scan
 const WING_DELTA = 0.10;                     // long-wing target |delta| (defined risk)
 
 const corsHeaders = {
@@ -37,22 +37,15 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-// ---- math ----------------------------------------------------------------
-function normCdf(x: number): number {
-  // Abramowitz-Stegun
-  const t = 1 / (1 + 0.2316419 * Math.abs(x));
-  const d = 0.3989423 * Math.exp(-x * x / 2);
-  let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
-  return x > 0 ? 1 - p : p;
-}
-function callDelta(S: number, K: number, T: number, sigma: number): number {
-  if (S <= 0 || K <= 0 || T <= 0 || sigma <= 0) return S > K ? 1 : 0;
-  const d1 = (Math.log(S / K) + (RISK_FREE + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
-  return normCdf(d1);
-}
+// ---- helpers -------------------------------------------------------------
 const clamp = (x: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, x));
+const normIv = (x: number) => (x > 3 ? x / 100 : x); // CBOE iv may be % or decimal
 
-type Contract = { strike: number; bid: number; ask: number; last: number; iv: number; vol: number; oi: number };
+// A single option contract parsed from the CBOE delayed-quote feed.
+type Contract = {
+  cp: "C" | "P"; strike: number; expUnix: number;
+  bid: number; ask: number; last: number; iv: number; delta: number; vol: number; oi: number;
+};
 function mid(c: Contract): number {
   if (c.bid > 0 && c.ask > 0) return (c.bid + c.ask) / 2;
   return c.last > 0 ? c.last : (c.ask > 0 ? c.ask / 2 : 0);
@@ -63,6 +56,20 @@ function nearestStrike(list: Contract[], target: number): Contract | null {
   return best;
 }
 
+// Parse an OCC option symbol, e.g. "JBL260618C00070000" -> Call, 2026-06-18, strike 70.
+// The trailing 15 chars are fixed (YYMMDD + C/P + 8-digit strike); the root precedes them.
+function parseOcc(occ: string): { cp: "C" | "P"; strike: number; expUnix: number } | null {
+  if (occ.length < 16) return null;
+  const strikeRaw = occ.slice(-8), cp = occ.slice(-9, -8);
+  const yy = occ.slice(-15, -13), mm = occ.slice(-13, -11), dd = occ.slice(-11, -9);
+  if ((cp !== "C" && cp !== "P") || !/^\d{6}$/.test(yy + mm + dd) || !/^\d{8}$/.test(strikeRaw)) return null;
+  return {
+    cp,
+    strike: +strikeRaw / 1000,
+    expUnix: Math.floor(Date.UTC(2000 + +yy, +mm - 1, +dd) / 1000),
+  };
+}
+
 // ---- data fetchers -------------------------------------------------------
 async function earningsCalendar(fromISO: string, toISO: string) {
   const r = await fetch(`${FINNHUB}/calendar/earnings?from=${fromISO}&to=${toISO}&token=${FINNHUB_KEY}`);
@@ -70,72 +77,91 @@ async function earningsCalendar(fromISO: string, toISO: string) {
   return (d?.earningsCalendar ?? []) as Array<{ symbol: string; date: string; hour: string; epsEstimate: number | null }>;
 }
 
-function parseChain(node: any): { calls: Contract[]; puts: Contract[] } {
-  const map = (arr: any[]): Contract[] =>
-    (arr ?? []).map((o) => ({
-      strike: +o.strike, bid: +(o.bid ?? 0), ask: +(o.ask ?? 0), last: +(o.lastPrice ?? 0),
-      iv: +(o.impliedVolatility ?? 0), vol: +(o.volume ?? 0), oi: +(o.openInterest ?? 0),
-    }));
-  return { calls: map(node?.calls), puts: map(node?.puts) };
-}
-
-async function yahooOptions(sym: string, dateUnix?: number) {
-  const url = dateUnix ? `${YOPT}/${sym}?date=${dateUnix}` : `${YOPT}/${sym}`;
-  const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+// Live CBOE delayed (~15 min) option chain: spot + parsed calls/puts with greeks.
+async function cboeOptions(sym: string): Promise<{ spot: number; calls: Contract[]; puts: Contract[] } | null> {
+  const r = await fetch(`${CBOE}/${encodeURIComponent(sym)}.json`, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!r.ok) return null;
   const d = await r.json();
-  const res = d?.optionChain?.result?.[0];
-  if (!res) return null;
-  return {
-    spot: +(res.quote?.regularMarketPrice ?? 0),
-    expirations: (res.expirationDates ?? []) as number[],
-    first: res.options?.[0] ?? null, // { expirationDate, calls, puts }
-  };
+  const data = d?.data;
+  if (!data || !Array.isArray(data.options)) return null;
+  const calls: Contract[] = [], puts: Contract[] = [];
+  for (const o of data.options) {
+    const p = parseOcc(String(o.option ?? ""));
+    if (!p) continue;
+    const c: Contract = {
+      cp: p.cp, strike: p.strike, expUnix: p.expUnix,
+      bid: +(o.bid ?? 0), ask: +(o.ask ?? 0), last: +(o.last_trade_price ?? 0),
+      iv: normIv(+(o.iv ?? 0)), delta: +(o.delta ?? 0), vol: +(o.volume ?? 0), oi: +(o.open_interest ?? 0),
+    };
+    (p.cp === "C" ? calls : puts).push(c);
+  }
+  return { spot: +(data.current_price ?? 0), calls, puts };
+}
+
+// Recent realized daily vol (decimal) from Yahoo daily candles — the v8 chart
+// endpoint works without a crumb (only the v7 options endpoint is gated).
+const YCHART = "https://query1.finance.yahoo.com/v8/finance/chart";
+async function recentDailyVol(sym: string): Promise<number> {
+  try {
+    const r = await fetch(`${YCHART}/${sym}?range=3mo&interval=1d`, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!r.ok) return 0.02;
+    const d = await r.json();
+    const closes = (d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [])
+      .filter((x: number | null): x is number => typeof x === "number");
+    if (closes.length < 11) return 0.02;
+    const rets: number[] = [];
+    for (let i = 1; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+    const recent = rets.slice(-30);
+    const m = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const v = recent.reduce((a, b) => a + (b - m) ** 2, 0) / recent.length;
+    return Math.sqrt(v) || 0.02;
+  } catch {
+    return 0.02;
+  }
 }
 
 // ---- per-candidate butterfly ---------------------------------------------
 async function buildCandidate(sym: string, earnDateISO: string, hour: string, rel: any) {
-  const base = await yahooOptions(sym);
-  if (!base || base.spot <= 0 || base.expirations.length === 0) return null;
+  const chain = await cboeOptions(sym);
+  if (!chain || chain.spot <= 0 || !chain.calls.length || !chain.puts.length) return null;
+  const spot = chain.spot;
   const earnUnix = Math.floor(new Date(earnDateISO + "T00:00:00Z").getTime() / 1000);
-  // first expiration on/after the earnings date (captures the event)
-  const targetExp = base.expirations.find((e) => e >= earnUnix - 86400) ?? base.expirations[0];
 
-  let chainNode = base.first;
-  if (!chainNode || chainNode.expirationDate !== targetExp) {
-    const r2 = await yahooOptions(sym, targetExp);
-    chainNode = r2?.first ?? chainNode;
-  }
-  if (!chainNode) return null;
-  const { calls, puts } = parseChain(chainNode);
+  // first expiration on/after the earnings date (captures the event)
+  const exps = [...new Set(chain.calls.map((c) => c.expUnix))].sort((a, b) => a - b);
+  const targetExp = exps.find((e) => e >= earnUnix - 86400) ?? exps[exps.length - 1];
+  if (!targetExp) return null;
+
+  const tradable = (c: Contract) => c.expUnix === targetExp && (c.bid > 0 || c.ask > 0);
+  const calls = chain.calls.filter(tradable);
+  const puts = chain.puts.filter(tradable);
   if (!calls.length || !puts.length) return null;
 
-  const spot = base.spot;
-  const expUnix = chainNode.expirationDate ?? targetExp;
+  const expUnix = targetExp;
   const dteDays = Math.max(1, Math.round((expUnix * 1000 - Date.now()) / 86400000));
-  const T = dteDays / 365;
 
-  // ATM straddle body
-  const atmC = nearestStrike(calls, spot)!, atmP = nearestStrike(puts, spot)!;
-  const atmK = Math.abs(atmC.strike - spot) <= Math.abs(atmP.strike - spot) ? atmC.strike : atmP.strike;
-  const bodyC = calls.find((c) => c.strike === atmK) ?? atmC;
-  const bodyP = puts.find((p) => p.strike === atmK) ?? atmP;
+  // ATM straddle body: nearest-to-spot strike listed for BOTH a call and a put
+  const callStrikes = new Set(calls.map((c) => c.strike));
+  const common = puts.filter((p) => callStrikes.has(p.strike)).map((p) => p.strike);
+  if (!common.length) return null;
+  const atmK = common.reduce((a, b) => (Math.abs(b - spot) < Math.abs(a - spot) ? b : a));
+  const bodyC = calls.find((c) => c.strike === atmK)!;
+  const bodyP = puts.find((p) => p.strike === atmK)!;
   const straddle = mid(bodyC) + mid(bodyP);
   if (straddle <= 0) return null;
   const impliedMove = straddle / spot;
 
-  // long wings at ~WING_DELTA (defined risk near the expected-move edge)
+  // long wings at ~WING_DELTA using CBOE's reported delta (defined risk)
   let wingC: Contract | null = null, wcd = Infinity;
   for (const c of calls) {
-    if (c.strike <= atmK) continue;
-    const dd = Math.abs(callDelta(spot, c.strike, T, c.iv) - WING_DELTA);
+    if (c.strike <= atmK || mid(c) <= 0) continue;
+    const dd = Math.abs(c.delta - WING_DELTA);
     if (dd < wcd) { wcd = dd; wingC = c; }
   }
   let wingP: Contract | null = null, wpd = Infinity;
   for (const p of puts) {
-    if (p.strike >= atmK) continue;
-    const putDelta = callDelta(spot, p.strike, T, p.iv) - 1; // delta of put
-    const dd = Math.abs(Math.abs(putDelta) - WING_DELTA);
+    if (p.strike >= atmK || mid(p) <= 0) continue;
+    const dd = Math.abs(Math.abs(p.delta) - WING_DELTA);
     if (dd < wpd) { wpd = dd; wingP = p; }
   }
   if (!wingC || !wingP) return null;
@@ -149,17 +175,28 @@ async function buildCandidate(sym: string, earnDateISO: string, hour: string, re
 
   const atmIv = (bodyC.iv + bodyP.iv) / 2;
   const liq = (bodyC.vol + bodyP.vol) + 0.2 * (bodyC.oi + bodyP.oi);
-  const richness = rel?.avg_actual > 0 ? impliedMove / rel.avg_actual : null;
+
+  // DTE-robust richness: live implied move vs the move you'd EXPECT to the same
+  // expiry = sqrt(earnings_jump^2 + diffusion over the non-event days). This makes
+  // a 2-DTE front-week and a 31-DTE monthly directly comparable.
+  const jump = rel?.avg_actual > 0 ? rel.avg_actual : impliedMove;
+  const baseVol = await recentDailyVol(sym);
+  const expMove = Math.sqrt(jump * jump + baseVol * baseVol * Math.max(0, dteDays - 1));
+  const richness = expMove > 0 ? impliedMove / expMove : null;
 
   // ---- confidence score (0-100) from research flags ----
-  const richC = richness != null ? clamp((richness - 0.9) / 0.6) : 0.4;          // 0.9->0 .. 1.5->1
+  const richC = richness != null ? clamp((richness - 1.0) / 0.4) : 0.4;          // 1.0->0 .. 1.4->1
   const histC = rel?.fly_win != null ? clamp((rel.fly_win - 0.4) / 0.4) : 0.3;   // 40%->0 .. 80%->1
   const ivC = clamp((atmIv - 0.3) / 0.5);                                         // 30%->0 .. 80%->1
   const nC = rel?.n != null ? clamp(rel.n / 12) : 0;
   const amcC = hour === "amc" ? 1 : hour === "bmo" ? 0.7 : 0.5;
+  // DTE suitability: this is a front-week IV-crush trade. A clean ~2-9 DTE expiry
+  // is ideal; a far monthly (no weeklies) both inflates the implied-move signal and
+  // isn't the same overnight trade, so it is penalised.
+  const dteC = dteDays <= 9 ? 1 : dteDays <= 21 ? clamp(1 - (dteDays - 9) / 24) : 0.35;
   const liqGate = liq >= 500 ? 1 : liq >= 100 ? 0.8 : 0.6;
   const confidence = Math.round(
-    100 * liqGate * (0.34 * richC + 0.30 * histC + 0.16 * ivC + 0.10 * nC + 0.10 * amcC),
+    100 * liqGate * (0.28 * richC + 0.26 * histC + 0.14 * ivC + 0.10 * nC + 0.08 * amcC + 0.14 * dteC),
   );
 
   return {
@@ -208,6 +245,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const days = Math.min(14, Math.max(1, +body.days || 7));
     const force = !!body.force;
+    const debug = !!body.debug;
     const cacheKey = `${days}d`;
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -241,6 +279,29 @@ Deno.serve(async (req) => {
     });
     const results = built.filter((x): x is NonNullable<typeof x> => x != null)
       .sort((a, b) => b.confidence - a.confidence);
+
+    if (debug) {
+      const calSyms = cal.map((e) => e.symbol);
+      const probe = ["JBL", "KMX", "KR"].map((t) => ({
+        t,
+        inCalendar: calSyms.includes(t),
+        inReliability: relMap.has(t),
+        calEntry: cal.find((e) => e.symbol === t) ?? null,
+      }));
+      return json({
+        debug: true,
+        window: { from, to, days },
+        finnhubKeyPresent: FINNHUB_KEY.length > 0,
+        calendarCount: cal.length,
+        calendarSample: cal.slice(0, 20).map((e) => ({ s: e.symbol, d: e.date, h: e.hour })),
+        reliabilityCount: relMap.size,
+        candidatesAfterFilter: candidates.length,
+        candidateSymbols: candidates.map((c) => c.symbol),
+        builtNonNull: results.length,
+        builtNullSymbols: candidates.filter((_, i) => built[i] == null).map((c) => c.symbol),
+        probe,
+      });
+    }
 
     const payload = { generatedAt: new Date().toISOString(), window: cacheKey, count: results.length, results, cached: false };
     await sb.from("earnings_scan_cache").upsert({ id: cacheKey, payload, created_at: new Date().toISOString() });
