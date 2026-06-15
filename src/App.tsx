@@ -10,6 +10,7 @@ const Visuals = lazy(() => import("@/pages/Visuals"));
 const Strategy = lazy(() => import("@/pages/Strategy"));
 const History = lazy(() => import("@/pages/History"));
 const TradeAnalysis = lazy(() => import("@/pages/TradeAnalysis"));
+const EarningsScanner = lazy(() => import("@/pages/EarningsScanner"));
 
 function FullScreenLoader() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/strategy" element={<Strategy />} />
             <Route path="/history" element={<History />} />
             <Route path="/analysis" element={<TradeAnalysis />} />
+            <Route path="/scanner" element={<EarningsScanner />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (

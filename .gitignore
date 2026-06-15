@@ -13,3 +13,9 @@ dist-ssr
 .claude/settings.local.json
 # Reference Streamlit app — not part of the React build
 Risk Dashboard Final/
+
+# Research scratch (not committed)
+research/
+
+# Supabase CLI local state (regenerated on link)
+supabase/.temp/
