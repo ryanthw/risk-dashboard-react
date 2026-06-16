@@ -3,10 +3,21 @@ import { RefreshCw, TrendingDown, Info } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NumberInput } from "@/components/ui/number-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Chart } from "@/components/charts/Chart";
 import { CHART_COLORS } from "@/components/charts/theme";
 import { LoadingState, EmptyState, SectionTitle } from "@/components/ui/states";
 import { useEarningsScan, useRescan, type ScanCandidate } from "@/api/earnings";
+import { useScannerFilterStore, type ScannerStructure } from "@/store/scannerFilter";
+import { useActivePortfolio } from "@/hooks/useActivePortfolio";
+import { fmtUsd } from "@/lib/format";
 
 const WINDOWS = [3, 7, 14];
 
@@ -21,25 +32,100 @@ function confBadge(c: number): "gain" | "secondary" | "loss" {
   return "loss";
 }
 
+/** Normalized per-row view for whichever structure is selected. */
+interface StructView {
+  available: boolean;
+  maxGain: number;
+  maxLoss: number;
+  credit: number;
+  beLow: number;
+  beHigh: number;
+  confidence: number;
+  winPct: number | null;
+  sampleN: number;
+}
+
+/** Resolve a candidate to the selected structure. In condor mode a name with no
+ *  constructible condor is marked unavailable (filtered out of the view). */
+function structOf(r: ScanCandidate, structure: ScannerStructure): StructView {
+  if (structure === "condor") {
+    if (!r.condor) {
+      return { available: false, maxGain: 0, maxLoss: 0, credit: 0, beLow: 0, beHigh: 0, confidence: 0, winPct: null, sampleN: 0 };
+    }
+    return {
+      available: true,
+      maxGain: r.condor.maxGain,
+      maxLoss: r.condor.maxLoss,
+      credit: r.condor.credit,
+      beLow: r.condor.beLow,
+      beHigh: r.condor.beHigh,
+      confidence: r.condorConfidence ?? 0,
+      winPct: r.condorWinPct ?? null,
+      sampleN: r.condorSampleN ?? 0,
+    };
+  }
+  const bf = r.butterfly;
+  return {
+    available: true,
+    maxGain: bf.maxGain,
+    maxLoss: bf.maxLoss,
+    credit: bf.credit,
+    beLow: bf.beLow,
+    beHigh: bf.beHigh,
+    confidence: r.confidence,
+    winPct: r.flyWinPct,
+    sampleN: r.sampleN,
+  };
+}
+
+type Viewed = { r: ScanCandidate; v: StructView };
+
 export default function EarningsScanner() {
   const [days, setDays] = useState(7);
   const { data, isLoading, isError, error } = useEarningsScan(days);
   const rescan = useRescan();
 
-  const rows = data?.results ?? [];
+  const { structure, affordableOnly, maxLossPct, setStructure, setAffordableOnly, setMaxLossPct } =
+    useScannerFilterStore();
+  const { portValue } = useActivePortfolio();
+  // Dollar max-loss budget = maxLossPct of the active portfolio value.
+  const maxLossBudget = (maxLossPct / 100) * portValue;
+  const filterActive = affordableOnly && maxLossBudget > 0;
+  const isCondor = structure === "condor";
+
+  const allRows = data?.results ?? [];
+
+  // Resolve every candidate to the selected structure, drop ones the structure
+  // can't be built for (condor mode), then apply the affordability filter and
+  // re-rank by that structure's confidence. All client-side: switching structure
+  // or toggling the filter updates instantly with no refetch, on every timeframe.
+  const { base, viewed, tracked, noHistory } = useMemo(() => {
+    const base: Viewed[] = allRows
+      .map((r) => ({ r, v: structOf(r, structure) }))
+      .filter((x) => x.v.available);
+    const viewed = (filterActive ? base.filter((x) => x.v.maxLoss <= maxLossBudget) : base)
+      .sort((a, b) => b.v.confidence - a.v.confidence);
+    return {
+      base,
+      viewed,
+      tracked: viewed.filter((x) => x.r.hasHistory),
+      noHistory: viewed.filter((x) => !x.r.hasHistory),
+    };
+  }, [allRows, structure, filterActive, maxLossBudget]);
+
+  const affordHidden = base.length - viewed.length;          // hidden by the budget filter
+  const structDropped = allRows.length - base.length;        // no condor constructible
   const busy = isLoading || rescan.isPending;
-  const tracked = useMemo(() => rows.filter((r) => r.hasHistory), [rows]);
-  const noHistory = useMemo(() => rows.filter((r) => !r.hasHistory), [rows]);
 
   const chart = useMemo(() => {
     if (!tracked.length) return null;
     // top 20, ascending so the best sits at the top of a horizontal bar chart
     const top = [...tracked].slice(0, 20).reverse();
     return {
-      y: top.map((r) => r.ticker),
-      x: top.map((r) => r.confidence),
-      colors: top.map((r) => confColor(r.confidence)),
-      text: top.map((r) => `${r.confidence}`),
+      y: top.map((x) => x.r.ticker),
+      x: top.map((x) => x.v.confidence),
+      colors: top.map((x) => confColor(x.v.confidence)),
+      text: top.map((x) => `${x.v.confidence}`),
     };
   }, [tracked]);
 
@@ -50,11 +136,21 @@ export default function EarningsScanner() {
         <div>
           <h1 className="text-lg font-semibold">Earnings Premium Scanner</h1>
           <p className="text-xs text-muted-foreground">
-            Upcoming earnings ranked as short iron-butterfly candidates — implied vs historical
-            move, premium richness, and backtested per-ticker reliability.
+            Upcoming earnings ranked as short {isCondor ? "iron-condor" : "iron-butterfly"}{" "}
+            candidates — implied vs historical move, premium richness, and backtested per-ticker
+            reliability.
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Select value={structure} onValueChange={(v) => setStructure(v as ScannerStructure)}>
+            <SelectTrigger className="h-8 w-[9.5rem] text-xs" aria-label="Option structure">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="butterfly">Iron butterfly</SelectItem>
+              <SelectItem value="condor">Iron condor</SelectItem>
+            </SelectContent>
+          </Select>
           <div className="flex rounded-md border border-border p-0.5">
             {WINDOWS.map((w) => (
               <button
@@ -80,10 +176,47 @@ export default function EarningsScanner() {
         </div>
       </div>
 
+      {/* affordability filter — hide trades whose max loss exceeds a % of the account */}
+      <div className="-mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <input
+            type="checkbox"
+            checked={affordableOnly}
+            onChange={(e) => setAffordableOnly(e.target.checked)}
+            className="rd-checkbox"
+          />
+          <span className="text-muted-foreground">Hide trades with max loss over</span>
+        </label>
+        <div className="flex items-center gap-1">
+          <NumberInput
+            value={maxLossPct}
+            onChange={(n) => setMaxLossPct(Math.max(0, n))}
+            zeroAsEmpty={false}
+            min={0}
+            className="h-6 w-14 px-1.5 py-0 text-right text-xs"
+            aria-label="Max loss percent of account"
+          />
+          <span className="text-muted-foreground">% of account</span>
+        </div>
+        {affordableOnly &&
+          (portValue > 0 ? (
+            <span className="text-muted-foreground/80">
+              (≤ {fmtUsd(maxLossBudget, true)} of {fmtUsd(portValue, true)}
+              {affordHidden > 0 ? ` · ${affordHidden} hidden` : ""})
+            </span>
+          ) : (
+            <span className="text-amber-500/90">
+              Set the active portfolio's cash to use this filter
+            </span>
+          ))}
+      </div>
+
       {data && (
-        <p className="-mt-3 text-[0.7rem] text-muted-foreground">
-          {data.count} candidates · generated {new Date(data.generatedAt).toLocaleString()}
+        <p className="text-[0.7rem] text-muted-foreground">
+          {filterActive ? `${viewed.length} of ${data.count}` : viewed.length} candidates · generated{" "}
+          {new Date(data.generatedAt).toLocaleString()}
           {data.cached ? " · cached" : " · live"}
+          {isCondor && structDropped > 0 ? ` · ${structDropped} without a condor chain` : ""}
         </p>
       )}
 
@@ -91,11 +224,18 @@ export default function EarningsScanner() {
       {isError && (
         <EmptyState title="Scan failed" hint={String((error as Error)?.message ?? error)} />
       )}
-      {!isLoading && !isError && rows.length === 0 && (
-        <EmptyState
-          title="No tradeable earnings in this window"
-          hint="No upcoming earnings with listed options over the selected horizon. Try a longer window or refresh."
-        />
+      {!isLoading && !isError && viewed.length === 0 && (
+        filterActive && base.length > 0 ? (
+          <EmptyState
+            title="All candidates filtered out"
+            hint={`Every candidate's max loss exceeds ${maxLossPct}% of your account (${fmtUsd(maxLossBudget, true)}). Raise the percent or uncheck the filter.`}
+          />
+        ) : (
+          <EmptyState
+            title="No tradeable earnings in this window"
+            hint="No upcoming earnings with listed options over the selected horizon. Try a longer window or refresh."
+          />
+        )
       )}
 
       {chart && (
@@ -131,7 +271,7 @@ export default function EarningsScanner() {
       {tracked.length > 0 && (
         <div>
           <SectionTitle>Tracked — backtested edge ({tracked.length})</SectionTitle>
-          <ResultsTable rows={tracked} />
+          <ResultsTable rows={tracked} structure={structure} />
         </div>
       )}
 
@@ -144,11 +284,11 @@ export default function EarningsScanner() {
             Not in the backtested universe — ranked on live signals only (richness here is the IV
             term-structure premium, not a backtested win-rate). Treat as less-vetted.
           </p>
-          <ResultsTable rows={noHistory} />
+          <ResultsTable rows={noHistory} structure={structure} />
         </div>
       )}
 
-      {rows.length > 0 && (
+      {viewed.length > 0 && (
         <p className="flex items-start gap-1.5 text-[0.7rem] text-muted-foreground">
           <Info className="mt-0.5 h-3 w-3 shrink-0" />
           Max gain/loss are per 1 contract (×100). Enter ~5 min before the close on the day before
@@ -156,14 +296,16 @@ export default function EarningsScanner() {
           max-loss and spread across many names. Implied move &amp; strikes are live CBOE options
           (~15-min delayed) — confirm fills in your broker. For tracked names, richness compares the
           implied move to the expected move at that expiry; historical move &amp; win-rate are from
-          the S&amp;P 500 backtest (2020–2025).
+          the backtest (2020–2025). {isCondor
+            ? "Iron condor: sell the Δ16 strangle body, buy Δ5 wings — wider profit zone, smaller credit."
+            : "Iron butterfly: sell the ATM straddle body, buy Δ10 wings — richest credit, tighter zone."}
         </p>
       )}
     </div>
   );
 }
 
-function ResultsTable({ rows }: { rows: ScanCandidate[] }) {
+function ResultsTable({ rows, structure }: { rows: Viewed[]; structure: ScannerStructure }) {
   return (
     <Card>
       <CardContent className="overflow-x-auto p-0">
@@ -177,15 +319,19 @@ function ResultsTable({ rows }: { rows: ScanCandidate[] }) {
               <Th right>Rich</Th>
               <Th right>IV</Th>
               <Th right>Hist win</Th>
-              <Th>Iron butterfly (short / wings)</Th>
+              <Th>
+                {structure === "condor"
+                  ? "Iron condor (wings / shorts)"
+                  : "Iron butterfly (short / wings)"}
+              </Th>
               <Th right>Max gain</Th>
               <Th right>Max loss</Th>
               <Th right>Conf</Th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <Row key={r.ticker} r={r} />
+            {rows.map(({ r, v }) => (
+              <Row key={r.ticker} r={r} v={v} structure={structure} />
             ))}
           </tbody>
         </table>
@@ -198,8 +344,42 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
   return <th className={`px-3 py-2 font-medium ${right ? "text-right" : ""}`}>{children}</th>;
 }
 
-function Row({ r }: { r: ScanCandidate }) {
+function StrikeCell({ r, structure }: { r: ScanCandidate; structure: ScannerStructure }) {
+  if (structure === "condor" && r.condor) {
+    const c = r.condor;
+    return (
+      <>
+        <span className="text-loss/80">{c.longPut}</span>
+        <span className="text-muted-foreground">/</span>
+        <span className="font-medium">{c.shortPut}</span>
+        <span className="text-muted-foreground"> – </span>
+        <span className="font-medium">{c.shortCall}</span>
+        <span className="text-muted-foreground">/</span>
+        <span className="text-gain/80">{c.longCall}</span>
+        <div className="text-[0.65rem] text-muted-foreground">
+          {r.expiration} · {r.dte}d · cr {c.credit} · BE {c.beLow}–{c.beHigh}
+        </div>
+      </>
+    );
+  }
   const bf = r.butterfly;
+  return (
+    <>
+      <span className="font-medium">{bf.shortStrike}</span>
+      <span className="text-muted-foreground">
+        {" "}
+        ± <span className="text-loss/80">{bf.longPut}</span>
+        {" / "}
+        <span className="text-gain/80">{bf.longCall}</span>
+      </span>
+      <div className="text-[0.65rem] text-muted-foreground">
+        {r.expiration} · {r.dte}d · cr {bf.credit} · BE {bf.beLow}–{bf.beHigh}
+      </div>
+    </>
+  );
+}
+
+function Row({ r, v, structure }: { r: ScanCandidate; v: StructView; structure: ScannerStructure }) {
   const rich = r.premiumRichness;
   return (
     <tr className="border-b border-border/50 hover:bg-accent/30">
@@ -230,29 +410,19 @@ function Row({ r }: { r: ScanCandidate }) {
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{r.atmIvPct}%</td>
       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-        {r.flyWinPct != null ? `${r.flyWinPct}% · n${r.sampleN}` : "—"}
+        {v.winPct != null ? `${v.winPct}% · n${v.sampleN}` : "—"}
       </td>
       <td className="px-3 py-2.5 text-xs">
-        <span className="font-medium">{bf.shortStrike}</span>
-        <span className="text-muted-foreground">
-          {" "}
-          ±{" "}
-          <span className="text-loss/80">{bf.longPut}</span>
-          {" / "}
-          <span className="text-gain/80">{bf.longCall}</span>
-        </span>
-        <div className="text-[0.65rem] text-muted-foreground">
-          {r.expiration} · {r.dte}d · cr {bf.credit} · BE {bf.beLow}–{bf.beHigh}
-        </div>
+        <StrikeCell r={r} structure={structure} />
       </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-gain">${bf.maxGain}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums text-gain">${v.maxGain}</td>
       <td className="px-3 py-2.5 text-right tabular-nums text-loss">
         <span className="inline-flex items-center gap-0.5">
-          <TrendingDown className="h-3 w-3" />${bf.maxLoss}
+          <TrendingDown className="h-3 w-3" />${v.maxLoss}
         </span>
       </td>
       <td className="px-3 py-2.5 text-right">
-        <Badge variant={confBadge(r.confidence)}>{r.confidence}</Badge>
+        <Badge variant={confBadge(v.confidence)}>{v.confidence}</Badge>
       </td>
     </tr>
   );

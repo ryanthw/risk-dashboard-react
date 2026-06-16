@@ -14,6 +14,20 @@ export interface ButterflyLeg {
   putWidth: number;
 }
 
+export interface CondorLeg {
+  shortCall: number;
+  shortPut: number;
+  longCall: number;
+  longPut: number;
+  credit: number;
+  maxGain: number; // per 1 contract (x100)
+  maxLoss: number;
+  beLow: number;
+  beHigh: number;
+  callWidth: number;
+  putWidth: number;
+}
+
 export interface ScanCandidate {
   ticker: string;
   hasHistory: boolean;
@@ -28,9 +42,16 @@ export interface ScanCandidate {
   atmIvPct: number;
   flyWinPct: number | null;
   sampleN: number;
+  /** Iron-condor reliability (null when the name has no backtested condor history). */
+  condorWinPct?: number | null;
+  condorSampleN?: number;
   butterfly: ButterflyLeg;
+  /** Iron condor built from the live chain; null when Δ16/Δ5 strikes weren't available. */
+  condor?: CondorLeg | null;
   liquidity: number;
   confidence: number;
+  /** Condor confidence; null when no condor could be built. */
+  condorConfidence?: number | null;
 }
 
 export interface ScanResult {
