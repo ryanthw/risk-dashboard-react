@@ -23,7 +23,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const CACHE_TTL_MS = 20 * 60 * 1000;       // 20 min
 const MAX_CANDIDATES = 50;                  // cap live option-chain fetches per scan
-const WING_DELTA = 0.10;                     // long-wing target |delta| (defined risk)
+const WING_DELTA = 0.10;                     // butterfly long-wing target |delta| (defined risk)
+const CONDOR_SHORT_DELTA = 0.16;             // iron-condor short strikes (Δ16 body)
+const CONDOR_WING_DELTA = 0.05;              // iron-condor long wings (Δ5)
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,6 +55,16 @@ function mid(c: Contract): number {
 function nearestStrike(list: Contract[], target: number): Contract | null {
   let best: Contract | null = null, bd = Infinity;
   for (const c of list) { const d = Math.abs(c.strike - target); if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+// Nearest tradable contract to a target |delta|, restricted by `ok` (e.g. strike side).
+function pickByDelta(list: Contract[], targetAbsDelta: number, ok: (c: Contract) => boolean): Contract | null {
+  let best: Contract | null = null, bd = Infinity;
+  for (const c of list) {
+    if (!ok(c) || mid(c) <= 0) continue;
+    const d = Math.abs(Math.abs(c.delta) - targetAbsDelta);
+    if (d < bd) { bd = d; best = c; }
+  }
   return best;
 }
 
@@ -200,21 +212,59 @@ async function buildCandidate(sym: string, earnDateISO: string, hour: string, re
     richness = backIv && backIv > 0 ? atmIv / backIv : null;
   }
 
+  // ---- iron CONDOR (OTM Δ16 shorts / Δ5 wings) — the smoother backtested structure ----
+  // Built from the same chain so the user can toggle structures client-side.
+  const scCond = pickByDelta(calls, CONDOR_SHORT_DELTA, (c) => c.strike > atmK);
+  const spCond = pickByDelta(puts, CONDOR_SHORT_DELTA, (p) => p.strike < atmK);
+  let condorLeg: Record<string, number> | null = null;
+  if (scCond && spCond) {
+    const lcCond = pickByDelta(calls, CONDOR_WING_DELTA, (c) => c.strike > scCond.strike);
+    const lpCond = pickByDelta(puts, CONDOR_WING_DELTA, (p) => p.strike < spCond.strike);
+    if (lcCond && lpCond) {
+      const cCredit = (mid(scCond) + mid(spCond)) - (mid(lcCond) + mid(lpCond));
+      const cCallW = lcCond.strike - scCond.strike, cPutW = spCond.strike - lpCond.strike;
+      const cWidth = Math.max(cCallW, cPutW);
+      if (cCredit > 0 && cWidth > 0) {
+        const cMaxLoss = Math.max(0.01, cWidth - cCredit);
+        condorLeg = {
+          shortCall: scCond.strike,
+          shortPut: spCond.strike,
+          longCall: lcCond.strike,
+          longPut: lpCond.strike,
+          credit: +cCredit.toFixed(2),
+          maxGain: +(cCredit * 100).toFixed(0),   // per 1 contract (x100)
+          maxLoss: +(cMaxLoss * 100).toFixed(0),
+          beLow: +(spCond.strike - cCredit).toFixed(2),
+          beHigh: +(scCond.strike + cCredit).toFixed(2),
+          callWidth: +cCallW.toFixed(2),
+          putWidth: +cPutW.toFixed(2),
+        };
+      }
+    }
+  }
+
   // ---- confidence score (0-100) from research flags ----
+  // Structure-agnostic components (richness, IV, AMC, DTE, liquidity) are shared;
+  // only the historical win-rate + sample size differ per structure, so the score
+  // is a function of those — letting the butterfly and condor each get their own.
   const richSpread = hasHistory ? 0.4 : 0.6;                                      // no-history ratios run wider
   const richC = richness != null ? clamp((richness - 1.0) / richSpread) : 0.35;
-  const histC = rel?.fly_win != null ? clamp((rel.fly_win - 0.4) / 0.4) : 0.3;   // 40%->0 .. 80%->1
   const ivC = clamp((atmIv - 0.3) / 0.5);                                         // 30%->0 .. 80%->1
-  const nC = rel?.n != null ? clamp(rel.n / 12) : 0;
   const amcC = hour === "amc" ? 1 : hour === "bmo" ? 0.7 : 0.5;
   // DTE suitability: this is a front-week IV-crush trade. A clean ~2-9 DTE expiry
   // is ideal; a far monthly (no weeklies) both inflates the implied-move signal and
   // isn't the same overnight trade, so it is penalised.
   const dteC = dteDays <= 9 ? 1 : dteDays <= 21 ? clamp(1 - (dteDays - 9) / 24) : 0.35;
   const liqGate = liq >= 500 ? 1 : liq >= 100 ? 0.8 : 0.6;
-  const confidence = Math.round(
-    100 * liqGate * (0.28 * richC + 0.26 * histC + 0.14 * ivC + 0.10 * nC + 0.08 * amcC + 0.14 * dteC),
-  );
+  const scoreConfidence = (winRate: number | null | undefined, sampleN: number | null | undefined) => {
+    const histC = winRate != null ? clamp((winRate - 0.4) / 0.4) : 0.3;          // 40%->0 .. 80%->1
+    const nC = sampleN != null ? clamp(sampleN / 12) : 0;
+    return Math.round(
+      100 * liqGate * (0.28 * richC + 0.26 * histC + 0.14 * ivC + 0.10 * nC + 0.08 * amcC + 0.14 * dteC),
+    );
+  };
+  const confidence = scoreConfidence(rel?.fly_win, rel?.n);
+  const condorConfidence = condorLeg ? scoreConfidence(rel?.condor_win, rel?.condor_n) : null;
 
   return {
     ticker: sym,
@@ -230,6 +280,8 @@ async function buildCandidate(sym: string, earnDateISO: string, hour: string, re
     atmIvPct: +(atmIv * 100).toFixed(1),
     flyWinPct: rel?.fly_win != null ? Math.round(rel.fly_win * 100) : null,
     sampleN: rel?.n ?? 0,
+    condorWinPct: rel?.condor_win != null ? Math.round(rel.condor_win * 100) : null,
+    condorSampleN: rel?.condor_n ?? 0,
     butterfly: {
       shortStrike: atmK,
       longCall: wingC.strike,
@@ -242,8 +294,10 @@ async function buildCandidate(sym: string, earnDateISO: string, hour: string, re
       callWidth: +callW.toFixed(2),
       putWidth: +putW.toFixed(2),
     },
+    condor: condorLeg,
     liquidity: Math.round(liq),
     confidence,
+    condorConfidence,
   };
 }
 
