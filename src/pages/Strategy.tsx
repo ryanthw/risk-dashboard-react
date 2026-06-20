@@ -10,7 +10,6 @@ import { EmptyState, LoadingState, NoPortfolio, SectionTitle } from "@/component
 import { useActivePortfolio } from "@/hooks/useActivePortfolio";
 import { betaWeightedDelta, undeployedCash } from "@/engine/portfolio";
 import { fetchBatchCloses, correlationMatrix } from "@/api/marketData";
-import { OpportunityScanner } from "@/components/strategy/OpportunityScanner";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { fmtUsd, fmtPct, fmtNum } from "@/lib/format";
 import { TRADE_TYPE_LABELS, type TradeType } from "@/types";
@@ -320,25 +319,6 @@ export default function Strategy() {
           ) : (
             <EmptyState title="Correlation unavailable" hint="Could not load enough price history." />
           )}
-        </CardContent>
-      </Card>
-
-      {/* Opportunity scanner */}
-      <Card>
-        <CardContent className="pt-5">
-          <SectionTitle>Income Driver — Opportunity Scanner</SectionTitle>
-          <p className="mb-4 text-xs text-muted-foreground">
-            Scan a watchlist for high-IV wheel candidates, ranked by implied volatility
-            and how much they diversify your current sector exposure.
-          </p>
-          <OpportunityScanner
-            sectorWeights={Object.fromEntries(
-              Object.entries(agg.bySector).map(([s, risk]) => [
-                s,
-                agg.totalRisk > 0 ? risk / agg.totalRisk : 0,
-              ]),
-            )}
-          />
         </CardContent>
       </Card>
     </div>

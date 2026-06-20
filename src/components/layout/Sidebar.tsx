@@ -7,6 +7,7 @@ import {
   History as HistoryIcon,
   FlaskConical,
   Radar,
+  Banknote,
   LogOut,
   TrendingUp,
   UserCog,
@@ -23,6 +24,7 @@ const nav = [
   { to: "/history", label: "History", icon: HistoryIcon },
   { to: "/analysis", label: "Trade Analysis", icon: FlaskConical },
   { to: "/scanner", label: "Earnings Scanner", icon: Radar },
+  { to: "/income-scanner", label: "Income Scanner", icon: Banknote },
 ];
 
 export function Sidebar() {
