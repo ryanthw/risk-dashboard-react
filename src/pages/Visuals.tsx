@@ -165,11 +165,20 @@ export default function Visuals() {
                   x: legs.map((p) => p.trade.expiration ?? ""),
                   y: legs.map((p) => Math.abs(p.metrics.maxLoss)),
                   marker: { color: tickerColor(tk, uniqueTickers) },
+                  // Keep the ticker inside the dark hover box (white text) instead
+                  // of letting Plotly draw it as colored text on the page bg.
+                  hovertemplate: `<b>${tk}</b><br>Exp %{x}<br>Max Loss $%{y:,.0f}<extra></extra>`,
                 };
               })}
               layout={{
                 barmode: "group",
-                xaxis: { title: { text: "Expiration" }, type: "category" },
+                xaxis: {
+                  title: { text: "Expiration" },
+                  type: "category",
+                  // Soonest expiration on the left → farthest on the right
+                  // (ISO dates sort chronologically).
+                  categoryorder: "category ascending",
+                },
                 yaxis: { title: { text: "Max Loss ($)" }, tickprefix: "$" },
               }}
             />
