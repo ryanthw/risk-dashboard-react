@@ -116,12 +116,18 @@ CFG = Config()
 
 def token() -> str:
     key = os.environ.get("PUBLI_API_KEY")
-    if not key:                          # fall back to ~/.zshrc (not sourced by scripts)
+    if not key:                          # fall back to ~/.zshrc (interactive only)
         import re
-        for ln in open(os.path.expanduser("~/.zshrc")):
-            m = re.match(r'export PUBLI_API_KEY="?([^"]+)"?', ln)
-            if m:
-                key = m.group(1)
+        try:
+            for ln in open(os.path.expanduser("~/.zshrc")):
+                m = re.match(r'export PUBLI_API_KEY="?([^"]+)"?', ln)
+                if m:
+                    key = m.group(1)
+        except FileNotFoundError:
+            pass
+    if not key:
+        raise SystemExit("PUBLI_API_KEY not set (env or ~/.zshrc). In CI, add it "
+                         "as a repo secret; locally, set it in .env / ~/.zshrc.")
     r = requests.post(f"{BASE.replace('userapigateway','userapiauthservice')}"
                       "/personal/access-tokens",
                       json={"validityInMinutes": 60, "secret": key}, timeout=20)
