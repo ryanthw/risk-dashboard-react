@@ -1,4 +1,0 @@
-ticker,type,strike,expiry,qty,basis,assign_close,has_open_call
-SOUN,shares,,,100,5.20,6.10,no
-BBAI,put,4.5,2026-08-21,1,,,
-BTBT,shares,,,200,3.10,4.50,yes

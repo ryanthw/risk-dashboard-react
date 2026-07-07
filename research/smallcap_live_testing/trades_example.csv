@@ -1,5 +1,0 @@
-date,ticker,action,qty,plan_price,fill_price,status
-2026-07-08,SNDL,SELL_PUT,100,0.30,0.28,assigned
-2026-07-08,CGC,SELL_PUT,100,0.15,0.14,expired
-2026-07-08,RCAT,SELL_PUT,11,1.16,1.10,open
-2026-08-21,SNDL,SELL_CALL,100,0.12,0.11,open
