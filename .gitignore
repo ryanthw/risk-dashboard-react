@@ -18,7 +18,13 @@ Risk Dashboard Final/
 # data/artifacts (parquet caches, charts, logs, generated symbol lists).
 research/data/
 research/out/
-research/**/__pycache__/
+research/cds
+research/scripts
+research/smallcap
 
 # Supabase CLI local state (regenerated on link)
 supabase/.temp/
+
+# wheel live-testing secrets/logs
+research/smallcap_live_testing/.env
+research/smallcap_live_testing/orders/run.log

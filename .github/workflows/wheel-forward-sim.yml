@@ -1,0 +1,48 @@
+name: wheel-forward-sim
+
+# Automated mark-to-market forward test. Runs the wheel simulator on a schedule,
+# commits the updated portfolio state, and emails the run as a report.
+#
+# One-time setup:
+#  1. Commit these to the repo: research/smallcap_live_testing/ (the package) +
+#     research/smallcap/universe_expanded.csv + research/data/shares_adj.parquet
+#  2. Add repo Secrets (Settings > Secrets and variables > Actions):
+#     PUBLI_API_KEY, WHEEL_SMTP_USER, WHEEL_SMTP_PASS, WHEEL_EMAIL_TO
+#  3. First run initializes state at $100k (change START_EQUITY in wheel_sim.py
+#     first if you want a different base). Trigger manually via "Run workflow".
+
+on:
+  schedule:
+    - cron: "30 21 * * 1-5"      # ~weekdays after US close (UTC; GH may delay)
+  workflow_dispatch: {}          # manual "Run workflow" button
+
+permissions:
+  contents: write               # to commit the updated state back
+
+concurrency: wheel-sim          # never overlap runs (state integrity)
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas numpy requests yfinance pyarrow
+      - name: run simulator
+        env:
+          PUBLI_API_KEY: ${{ secrets.PUBLI_API_KEY }}
+          WHEEL_SMTP_USER: ${{ secrets.WHEEL_SMTP_USER }}
+          WHEEL_SMTP_PASS: ${{ secrets.WHEEL_SMTP_PASS }}
+          WHEEL_EMAIL_TO: ${{ secrets.WHEEL_EMAIL_TO }}
+        run: python3 research/smallcap_live_testing/wheel_sim.py --email "$WHEEL_EMAIL_TO"
+      - name: commit state
+        run: |
+          git config user.name "wheel-sim-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add research/smallcap_live_testing/state \
+                  research/smallcap_live_testing/equity_log.csv \
+                  research/smallcap_live_testing/trades.csv
+          git diff --staged --quiet || git commit -m "wheel sim $(date -u +%F)"
+          git push
