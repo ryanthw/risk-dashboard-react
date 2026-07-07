@@ -1,0 +1,7 @@
+ticker,action,qty,plan_price,fill_price,status,date
+CGC,SELL_PUT,100,0.16,0.16,open,2026-07-07
+ONDS,SELL_PUT,14,0.82,0.82,open,2026-07-07
+RUM,SELL_PUT,16,0.65,0.65,open,2026-07-07
+INDI,SELL_PUT,28,0.38,0.38,open,2026-07-07
+BLDP,SELL_PUT,33,0.32,0.32,open,2026-07-07
+HIVE,SELL_PUT,33,0.3,0.3,open,2026-07-07

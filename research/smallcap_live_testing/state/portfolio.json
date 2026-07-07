@@ -1,0 +1,63 @@
+{
+  "start_date": "2026-07-07",
+  "start_equity": 100000.0,
+  "cash": 106898.0,
+  "positions": [
+    {
+      "kind": "put",
+      "ticker": "CGC",
+      "strike": 1.0,
+      "expiry": "2026-08-21",
+      "qty": 100,
+      "credit": 0.16,
+      "opened": "2026-07-07"
+    },
+    {
+      "kind": "put",
+      "ticker": "ONDS",
+      "strike": 7.0,
+      "expiry": "2026-08-21",
+      "qty": 14,
+      "credit": 0.82,
+      "opened": "2026-07-07"
+    },
+    {
+      "kind": "put",
+      "ticker": "RUM",
+      "strike": 6.0,
+      "expiry": "2026-08-21",
+      "qty": 16,
+      "credit": 0.65,
+      "opened": "2026-07-07"
+    },
+    {
+      "kind": "put",
+      "ticker": "INDI",
+      "strike": 3.5,
+      "expiry": "2026-08-21",
+      "qty": 28,
+      "credit": 0.38,
+      "opened": "2026-07-07"
+    },
+    {
+      "kind": "put",
+      "ticker": "BLDP",
+      "strike": 3.0,
+      "expiry": "2026-08-21",
+      "qty": 33,
+      "credit": 0.32,
+      "opened": "2026-07-07"
+    },
+    {
+      "kind": "put",
+      "ticker": "HIVE",
+      "strike": 3.0,
+      "expiry": "2026-08-21",
+      "qty": 33,
+      "credit": 0.3,
+      "opened": "2026-07-07"
+    }
+  ],
+  "realized_pnl": 0.0,
+  "last_run": "2026-07-07T20:01:18+00:00"
+}
