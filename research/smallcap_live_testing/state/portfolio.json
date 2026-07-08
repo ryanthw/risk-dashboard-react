@@ -1,7 +1,7 @@
 {
   "start_date": "2026-07-07",
   "start_equity": 100000.0,
-  "cash": 106898.0,
+  "cash": 107870.0,
   "positions": [
     {
       "kind": "put",
@@ -56,8 +56,17 @@
       "qty": 33,
       "credit": 0.3,
       "opened": "2026-07-07"
+    },
+    {
+      "kind": "put",
+      "ticker": "RCAT",
+      "strike": 8.0,
+      "expiry": "2026-08-21",
+      "qty": 12,
+      "credit": 0.81,
+      "opened": "2026-07-08"
     }
   ],
   "realized_pnl": 0.0,
-  "last_run": "2026-07-07T22:38:24+00:00"
+  "last_run": "2026-07-08T22:33:18+00:00"
 }
