@@ -1,7 +1,7 @@
 {
   "start_date": "2026-07-07",
   "start_equity": 100000.0,
-  "cash": 108990.0,
+  "cash": 112104.0,
   "positions": [
     {
       "kind": "put",
@@ -74,8 +74,26 @@
       "qty": 20,
       "credit": 0.56,
       "opened": "2026-07-09"
+    },
+    {
+      "kind": "put",
+      "ticker": "VFF",
+      "strike": 2.0,
+      "expiry": "2026-08-21",
+      "qty": 49,
+      "credit": 0.42,
+      "opened": "2026-07-10"
+    },
+    {
+      "kind": "put",
+      "ticker": "BTBT",
+      "strike": 1.5,
+      "expiry": "2026-08-21",
+      "qty": 66,
+      "credit": 0.16,
+      "opened": "2026-07-10"
     }
   ],
   "realized_pnl": 0.0,
-  "last_run": "2026-07-09T22:51:02+00:00"
+  "last_run": "2026-07-10T22:33:44+00:00"
 }
