@@ -1,7 +1,7 @@
 {
   "start_date": "2026-07-07",
   "start_equity": 100000.0,
-  "cash": 112104.0,
+  "cash": 113054.0,
   "positions": [
     {
       "kind": "put",
@@ -92,8 +92,17 @@
       "qty": 66,
       "credit": 0.16,
       "opened": "2026-07-10"
+    },
+    {
+      "kind": "put",
+      "ticker": "PLUG",
+      "strike": 2.0,
+      "expiry": "2026-08-21",
+      "qty": 50,
+      "credit": 0.19,
+      "opened": "2026-07-13"
     }
   ],
   "realized_pnl": 0.0,
-  "last_run": "2026-07-10T22:33:44+00:00"
+  "last_run": "2026-07-13T22:27:46+00:00"
 }
