@@ -26,6 +26,10 @@ function draftToInput(draft: TradeDraft, portfolioId: string): TradeInput {
     strike: isShares || draft.strike <= 0 ? null : draft.strike,
     strike_2: isSpread(draft.trade_type) && draft.strike_2 > 0 ? draft.strike_2 : null,
     premium: isShares ? null : draft.premium,
+    // Basis falls back to the (auto-fetched) live price when not entered.
+    cost_basis: isShares
+      ? (draft.cost_basis > 0 ? draft.cost_basis : draft.underlying_price)
+      : null,
     iv: draft.iv,
     expiration: isShares ? null : draft.expiration,
     underlying_price: draft.underlying_price,

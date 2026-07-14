@@ -8,6 +8,7 @@ import {
   FlaskConical,
   Radar,
   Banknote,
+  Layers,
   LogOut,
   TrendingUp,
   UserCog,
@@ -25,6 +26,7 @@ const nav = [
   { to: "/analysis", label: "Trade Analysis", icon: FlaskConical },
   { to: "/scanner", label: "Earnings Scanner", icon: Radar },
   { to: "/income-scanner", label: "Income Scanner", icon: Banknote },
+  { to: "/basis", label: "Basis Tracker", icon: Layers },
 ];
 
 export function Sidebar() {
