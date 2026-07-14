@@ -14,6 +14,7 @@ function mapTrade(row: Record<string, unknown>): Trade {
     premium: row.premium == null ? null : Number(row.premium),
     iv: Number(row.iv),
     underlying_price: row.underlying_price == null ? null : Number(row.underlying_price),
+    cost_basis: row.cost_basis == null ? null : Number(row.cost_basis),
     beta: Number(row.beta ?? 1),
   };
 }

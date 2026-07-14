@@ -28,6 +28,7 @@ export function EditTradeDialog({
   const [iv, setIv] = useState(trade.iv);
   const [qty, setQty] = useState(trade.qty);
   const [premium, setPremium] = useState(trade.premium ?? 0);
+  const [costBasis, setCostBasis] = useState(trade.cost_basis ?? 0);
   const [strike, setStrike] = useState(trade.strike ?? 0);
   const [strike2, setStrike2] = useState(trade.strike_2 ?? 0);
 
@@ -39,6 +40,8 @@ export function EditTradeDialog({
         iv,
         qty,
         premium: trade.trade_type === "shares" ? null : premium,
+        cost_basis:
+          trade.trade_type === "shares" && costBasis > 0 ? costBasis : trade.cost_basis,
         strike: strike > 0 ? strike : null,
         strike_2: spread && strike2 > 0 ? strike2 : null,
       });
@@ -68,6 +71,12 @@ export function EditTradeDialog({
             <Label>Implied Vol (dec)</Label>
             <NumberInput value={iv} onChange={setIv} step="any" />
           </div>
+          {trade.trade_type === "shares" && (
+            <div className="space-y-1.5">
+              <Label>Cost / share</Label>
+              <NumberInput value={costBasis} onChange={setCostBasis} step="any" />
+            </div>
+          )}
           {trade.trade_type !== "shares" && (
             <>
               <div className="space-y-1.5">

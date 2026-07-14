@@ -35,6 +35,7 @@ function draftToTrade(draft: TradeDraft, portfolioId: string): Trade {
     strike: isShares || draft.strike <= 0 ? null : draft.strike,
     strike_2: isSpread(draft.trade_type) && draft.strike_2 > 0 ? draft.strike_2 : null,
     premium: isShares ? null : draft.premium,
+    cost_basis: isShares && draft.cost_basis > 0 ? draft.cost_basis : null,
     iv: draft.iv,
     expiration: isShares ? null : draft.expiration,
     underlying_price: draft.underlying_price ?? 0,

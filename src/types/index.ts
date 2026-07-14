@@ -61,6 +61,8 @@ export interface Trade {
   iv: number; // decimal, 0.20 = 20%
   expiration: string | null; // ISO date
   underlying_price: number | null;
+  /** Per-share entry price for shares trades (options carry basis in premium). */
+  cost_basis: number | null;
   sector: string;
   beta: number;
   opened_at: string;
@@ -79,6 +81,7 @@ export interface TradeInput {
   iv: number;
   expiration: string | null;
   underlying_price: number | null;
+  cost_basis?: number | null;
   sector?: string;
   beta?: number;
 }

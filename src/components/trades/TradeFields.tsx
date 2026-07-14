@@ -23,6 +23,7 @@ export interface TradeDraft {
   strike: number;
   strike_2: number;
   premium: number;
+  cost_basis: number; // per-share entry price (shares only)
   iv: number;
   expiration: string; // ISO date
   underlying_price: number | null;
@@ -40,6 +41,7 @@ export function emptyDraft(): TradeDraft {
     strike: 0,
     strike_2: 0,
     premium: 0,
+    cost_basis: 0,
     iv: 0.3,
     expiration: exp.toISOString().slice(0, 10),
     underlying_price: null,
@@ -159,6 +161,13 @@ export function TradeFields({
 
       <div className="grid grid-cols-2 gap-3">
         <NumField label="Quantity" value={draft.qty} onChange={(n) => set({ qty: n })} step="1" />
+        {draft.trade_type === "shares" && (
+          <NumField
+            label="Cost / share"
+            value={draft.cost_basis}
+            onChange={(n) => set({ cost_basis: n })}
+          />
+        )}
         {draft.trade_type !== "shares" && (
           <NumField
             label={spread ? "Strike (Short)" : "Strike"}
