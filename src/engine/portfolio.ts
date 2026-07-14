@@ -40,7 +40,8 @@ export function percentExposure(positions: Position[], cash: number): number {
 
 export function cashPercent(positions: Position[], cash: number): number {
   const val = portfolioValue(positions, cash);
-  return val > 0 ? (cash / val) * 100 : 0;
+  const udp_cash = undeployedCash(positions, cash);
+  return val > 0 ? (udp_cash / val) * 100 : 0;
 }
 
 export function cashToPosRatio(positions: Position[], cash: number): number {
