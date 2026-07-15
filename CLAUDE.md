@@ -29,7 +29,7 @@ Rules of thumb:
 - Historical bars: `GET /userapigateway/historicdata/{TYPE}/{symbol}/{PERIOD}`, TYPE ∈ `EQUITY|OPTION|CRYPTO|INDEX`. Bars nest under `regularMarket.bars[]` (also `preMarket`); each bar `open/high/low/close/value/volume/timestamp/gain*`. **Prices are strings.**
   - Valid periods (docs are wrong — verified): `DAY WEEK MONTH QUARTER HALF_YEAR YEAR YTD ALL FIVE_YEARS TEN_YEARS`. Docs' `FIVE_YEAR`/`TEN_YEAR` are rejected.
   - Resolution is tied to period: `DAY/WEEK/QUARTER` = intraday, `MONTH`–`FIVE_YEARS` = daily, `TEN_YEARS`/`ALL` = monthly. Can't pick granularity independently.
-  - Options use the OSI symbol as `{symbol}`, e.g. `AAPL260821C00310000`.
+  - Options use the OSI symbol as `{symbol}`, e.g. `AAPL260821C00310000`. **Expired contracts return zero bars** (verified 2026-07): Public has no historical data for options past expiration, so it cannot back historical options research — use the OptionsDX chains in `research/` instead.
 - Option chain (with **live** greeks): `POST /userapigateway/marketdata/{accountId}/option-chain` with `{"instrument":{"symbol":"AAPL","type":"EQUITY"},"expirationDate":"YYYY-MM-DD"}` → `calls[]`/`puts[]`, each `optionDetails.greeks` = `delta gamma theta vega rho impliedVolatility`, plus `bid/ask/last/volume/openInterest/strikePrice/midPrice`. All numerics are **strings**; there is no expiration-listing endpoint (discover expirations elsewhere, e.g. the CBOE delayed chain).
 
 ### DoltHub SQL API — verified details

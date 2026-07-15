@@ -9,3 +9,7 @@ verify_jwt = true
 [functions.earnings-scanner]
 # Requires a logged-in user (valid JWT) to invoke.
 verify_jwt = true
+
+[functions.iv-surface]
+# Requires a logged-in user (valid JWT) to invoke.
+verify_jwt = true

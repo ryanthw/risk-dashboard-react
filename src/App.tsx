@@ -13,6 +13,7 @@ const TradeAnalysis = lazy(() => import("@/pages/TradeAnalysis"));
 const IncomeScanner = lazy(() => import("@/pages/IncomeScanner"));
 const EarningsScanner = lazy(() => import("@/pages/EarningsScanner"));
 const BasisTracker = lazy(() => import("@/pages/BasisTracker"));
+const IvSurface = lazy(() => import("@/pages/IvSurface"));
 
 function FullScreenLoader() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/analysis" element={<TradeAnalysis />} />
             <Route path="/scanner" element={<EarningsScanner />} />
             <Route path="/basis" element={<BasisTracker />} />
+            <Route path="/iv-surface" element={<IvSurface />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (

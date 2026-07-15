@@ -12,6 +12,7 @@ import {
   LogOut,
   TrendingUp,
   UserCog,
+  Waves,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/store/auth";
@@ -27,6 +28,7 @@ const nav = [
   { to: "/scanner", label: "Earnings Scanner", icon: Radar },
   { to: "/income-scanner", label: "Income Scanner", icon: Banknote },
   { to: "/basis", label: "Basis Tracker", icon: Layers },
+  { to: "/iv-surface", label: "IV Surface", icon: Waves },
 ];
 
 export function Sidebar() {
