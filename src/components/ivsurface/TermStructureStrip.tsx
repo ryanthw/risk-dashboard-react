@@ -6,7 +6,7 @@ import { macroEventsInWindow } from "@/lib/macroEvents";
 import type { SurfaceExpiration } from "@/api/ivSurface";
 
 /**
- * ATM IV across every listed expiration <= 40 DTE, with a 25Δ put/call skew
+ * ATM IV across every listed expiration 5-40 DTE, with a 25Δ put/call skew
  * band and dashed markers on the macro prints (FOMC / CPI / NFP) that put
  * event premium into a specific expiry. A front expiry spiking above its
  * neighbors right after an event marker is the sell-side of a double diagonal.

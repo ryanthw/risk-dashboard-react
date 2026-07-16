@@ -77,7 +77,10 @@ export function gradeEdge(combinedPts: number): EdgeGrade {
   return "No edge";
 }
 
-const MIN_FRONT_DTE = 3; // shorter fronts are pure gamma, not a diagonal
+// The surface itself is floored at 5 DTE upstream; this is the belt-and-braces
+// guard so a widened server window can't quietly put a gamma-bomb front leg
+// into the pair scan.
+const MIN_FRONT_DTE = 5;
 const GAP_MIN = 4; // need real decay separation between the expiries
 const GAP_MAX = 21;
 
