@@ -3,7 +3,7 @@
 //
 //   1. Discover expirations (+ spot) from the CBOE delayed chain — Public's
 //      option-chain endpoint needs an explicit expirationDate.
-//   2. Keep EVERY listed expiration 1-40 DTE (the strategy never trades past
+//   2. Keep EVERY listed expiration 5-40 DTE (the strategy never trades past
 //      40 DTE; SPY dailies cover roughly the first two weeks and matter for
 //      front-leg selection, so no expiration cap).
 //   3. Pull each expiration's chain from the Public API (live greeks) and
@@ -27,7 +27,11 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 const ALLOWED_TICKERS = new Set(["SPY"]);
 const CACHE_TTL_MS = 15 * 60 * 1000;
-const DTE_MIN = 1; // 0DTE IV is settlement noise, never a diagonal leg
+// Inside ~5 DTE the quoted IV is dominated by pin/settlement effects and the
+// wings blow out to numbers that aren't a tradable vol level — a front leg that
+// close is pure gamma, not a diagonal. Floor the whole surface there so the
+// heatmap and the pair scan see the same expirations.
+const DTE_MIN = 5;
 const DTE_MAX = 40;
 // |delta| targets for both wings. 50Δ ≈ ATM anchor; 15Δ is as far out as the
 // wings stay quotable on the dailies.
@@ -258,7 +262,9 @@ Deno.serve(async (req) => {
       const dte = dteOf(e);
       return dte >= DTE_MIN && dte <= DTE_MAX;
     });
-    if (!targetExps.length) return json({ error: "no expirations in the 1-40 DTE window" }, 404);
+    if (!targetExps.length) {
+      return json({ error: `no expirations in the ${DTE_MIN}-${DTE_MAX} DTE window` }, 404);
+    }
 
     const tok = await publicToken();
     const chains = new Map<string, Row[]>();

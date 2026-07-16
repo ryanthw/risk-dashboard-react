@@ -54,7 +54,7 @@ export default function IvSurface() {
             <Waves className="h-5 w-5 text-primary" /> SPY IV Surface
           </h1>
           <p className="text-xs text-muted-foreground">
-            Every listed expiration to 40 DTE (dailies included) · delta-bucketed live greeks via
+            Every listed expiration 5-40 DTE (dailies included) · delta-bucketed live greeks via
             Public · cached 15 min
           </p>
         </div>
