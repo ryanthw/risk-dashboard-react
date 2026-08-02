@@ -183,7 +183,7 @@ export function BasisCard({ pos }: { pos: BasisPosition }) {
             <>
               <VolTermChart expirations={vol.data.expirations} spot={spot} />
               <p className="mt-1 text-[0.7rem] text-muted-foreground">
-                ATM IV by expiration · band = 25Δ put–call skew · source:{" "}
+                ATM IV by expiration · source:{" "}
                 {vol.data.source === "public" ? "Public (live)" : "DoltHub (delayed)"}
               </p>
             </>

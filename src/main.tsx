@@ -6,6 +6,10 @@ import { queryClient } from "@/lib/queryClient";
 import { AuthProvider } from "@/store/auth";
 import { Toaster } from "@/components/ui/toast";
 import App from "./App";
+// Self-hosted variable fonts — bundled and fingerprinted by Vite, so there is
+// no render-blocking round trip to fonts.googleapis.com on cold load.
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

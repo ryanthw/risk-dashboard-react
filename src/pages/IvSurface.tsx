@@ -50,10 +50,9 @@ export default function IvSurface() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <Waves className="h-5 w-5 text-primary" /> SPY IV Surface
-          </h1>
-          <p className="text-xs text-muted-foreground">
+          {/* Title lives in the TopBar — this is the descriptive line only. */}
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Waves className="h-4 w-4 shrink-0 text-primary" />
             Every listed expiration 5-40 DTE (dailies included) · delta-bucketed live greeks via
             Public · cached 15 min
           </p>
@@ -94,30 +93,33 @@ export default function IvSurface() {
         <>
           <Card>
             <CardContent className="pt-5">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <SectionTitle>Suggested Pair — Best Front−Back IV Differential</SectionTitle>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  Short delta
-                  <Select
-                    value={String(targetDelta)}
-                    onValueChange={(v) => {
-                      setTargetDelta(Number(v));
-                      setPairKey(null);
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DELTA_CHOICES.map((d) => (
-                        <SelectItem key={d} value={String(d)}>
-                          {Math.round(d * 100)}Δ
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <SectionTitle
+                action={
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    Short delta
+                    <Select
+                      value={String(targetDelta)}
+                      onValueChange={(v) => {
+                        setTargetDelta(Number(v));
+                        setPairKey(null);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DELTA_CHOICES.map((d) => (
+                          <SelectItem key={d} value={String(d)}>
+                            {Math.round(d * 100)}Δ
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                }
+              >
+                Suggested Pair — Best Front−Back IV Differential
+              </SectionTitle>
               {best ? (
                 <SuggestionCard pair={best} />
               ) : (
@@ -149,27 +151,30 @@ export default function IvSurface() {
 
           <Card>
             <CardContent className="pt-5">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <SectionTitle>Pair Differential — Front − Back IV by Delta</SectionTitle>
-                {pairs.length > 0 && (
-                  <Select
-                    value={selectedPair ? `${selectedPair.front}|${selectedPair.back}` : ""}
-                    onValueChange={setPairKey}
-                  >
-                    <SelectTrigger className="h-8 w-64">
-                      <SelectValue placeholder="Pick an expiry pair" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {pairs.map((p) => (
-                        <SelectItem key={`${p.front}|${p.back}`} value={`${p.front}|${p.back}`}>
-                          {p.front.slice(5)} → {p.back.slice(5)} · {p.combinedPts >= 0 ? "+" : ""}
-                          {p.combinedPts.toFixed(2)} pt · {gradeEdge(p.combinedPts)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
+              <SectionTitle
+                action={
+                  pairs.length > 0 ? (
+                    <Select
+                      value={selectedPair ? `${selectedPair.front}|${selectedPair.back}` : ""}
+                      onValueChange={setPairKey}
+                    >
+                      <SelectTrigger className="h-8 w-64">
+                        <SelectValue placeholder="Pick an expiry pair" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {pairs.map((p) => (
+                          <SelectItem key={`${p.front}|${p.back}`} value={`${p.front}|${p.back}`}>
+                            {p.front.slice(5)} → {p.back.slice(5)} · {p.combinedPts >= 0 ? "+" : ""}
+                            {p.combinedPts.toFixed(2)} pt · {gradeEdge(p.combinedPts)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null
+                }
+              >
+                Pair Differential — Front − Back IV by Delta
+              </SectionTitle>
               {frontExp && backExp ? (
                 <PairDiffChart front={frontExp} back={backExp} />
               ) : (

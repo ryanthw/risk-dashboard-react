@@ -2,9 +2,33 @@ import { useMemo } from "react";
 import { format } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Chart } from "@/components/charts/Chart";
-import { CHART_COLORS } from "@/components/charts/theme";
-import { EmptyState, LoadingState, NoPortfolio, SectionTitle } from "@/components/ui/states";
+import type { EChartsOption } from "echarts";
+import { EChart } from "@/components/charts/EChart";
+import { CHART_COLORS, CHART_SURFACE, mixHex } from "@/components/charts/theme";
+import {
+  axisGrid,
+  axisUsd,
+  categoryAxis,
+  tipUsd,
+  valueAxis,
+} from "@/components/charts/echartsTheme";
+import {
+  EmptyState,
+  NoPortfolio,
+  SectionTitle,
+  Skeleton,
+  TableSkeleton,
+} from "@/components/ui/states";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableWrap,
+} from "@/components/ui/table";
+import { useTableSort } from "@/hooks/useTableSort";
 import { usePortfolioStore } from "@/store/portfolio";
 import { useSnapshots, useHistoryTrades } from "@/api/history";
 import { fmtUsd, fmtPct, pnlClass } from "@/lib/format";
@@ -15,16 +39,58 @@ export default function History() {
   const { data: snapshots, isLoading: loadingSnaps } = useSnapshots(activePortfolioId);
   const { data: closed, isLoading: loadingClosed } = useHistoryTrades(activePortfolioId);
 
-  const lineData = useMemo(() => {
+  const netLiqOption = useMemo<EChartsOption | null>(() => {
     if (!snapshots?.length) return null;
     return {
-      x: snapshots.map((s) => s.ts),
-      y: snapshots.map((s) => s.net_liquidity),
+      grid: { ...axisGrid(), left: 8, bottom: 32 },
+      xAxis: { ...categoryAxis(), type: "time" as const, name: undefined },
+      yAxis: valueAxis(undefined, axisUsd),
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "cross" },
+        valueFormatter: (v: unknown) => tipUsd(Number(v)),
+      },
+      series: [
+        {
+          type: "line",
+          name: "Net Liquidity",
+          // Straight segments: these are discrete daily snapshots, and a spline
+          // invents intermediate values that were never observed.
+          smooth: false,
+          symbolSize: 6,
+          data: snapshots.map((s) => [s.ts, s.net_liquidity] as [string, number]),
+          lineStyle: { color: CHART_COLORS.brand, width: 2.5 },
+          itemStyle: { color: CHART_COLORS.brand },
+          areaStyle: { color: mixHex(CHART_COLORS.brand, CHART_SURFACE, 0.78), opacity: 0.6 },
+        },
+      ],
     };
   }, [snapshots]);
 
+  // Stable identity so the sort memo doesn't re-run on every render.
+  const closedRows = useMemo(() => closed ?? [], [closed]);
+  const { sorted, sortKey, dir, onSort } = useTableSort(closedRows, {
+    initialKey: "exit",
+    initialDir: "desc",
+    accessors: {
+      ticker: (t) => t.ticker,
+      strategy: (t) => TRADE_TYPE_LABELS[t.trade_type as TradeType] ?? t.trade_type,
+      exit: (t) => (t.exit_date ? new Date(t.exit_date).getTime() : null),
+      iv: (t) => t.iv_at_close ?? null,
+      maxLoss: (t) => t.max_loss ?? null,
+      pnl: (t) => t.realized_pnl ?? null,
+    },
+  });
+  const sortProps = { activeKey: sortKey, dir, onSort };
+
   if (!activePortfolioId) return <NoPortfolio />;
-  if (loadingSnaps || loadingClosed) return <LoadingState />;
+  if (loadingSnaps || loadingClosed)
+    return (
+      <div className="mx-auto max-w-7xl space-y-6">
+        <Skeleton className="h-[26rem]" />
+        <TableSkeleton />
+      </div>
+    );
 
   const totalRealized = (closed ?? []).reduce((a, t) => a + (t.realized_pnl ?? 0), 0);
   const wins = (closed ?? []).filter((t) => (t.realized_pnl ?? 0) > 0).length;
@@ -36,28 +102,8 @@ export default function History() {
         <SectionTitle>Net Liquidity Over Time</SectionTitle>
         <Card>
           <CardContent className="pt-5">
-            {lineData ? (
-              <Chart
-                height={360}
-                data={[
-                  {
-                    type: "scatter",
-                    mode: "lines+markers",
-                    x: lineData.x,
-                    y: lineData.y,
-                    line: { color: CHART_COLORS.brand, width: 2.5, shape: "spline" },
-                    marker: { color: CHART_COLORS.brand, size: 6 },
-                    fill: "tozeroy",
-                    fillcolor: "rgba(20,153,214,0.08)",
-                    hovertemplate: "%{x|%b %d}<br>$%{y:,.2f}<extra></extra>",
-                  },
-                ]}
-                layout={{
-                  yaxis: { tickprefix: "$", tickformat: ",.0f" },
-                  xaxis: { type: "date" },
-                  hovermode: "x unified",
-                }}
-              />
+            {netLiqOption ? (
+              <EChart height={360} option={netLiqOption} />
             ) : (
               <EmptyState
                 title="No snapshots yet"
@@ -69,60 +115,76 @@ export default function History() {
       </div>
 
       <div>
-        <div className="mb-3 flex items-center justify-between">
-          <SectionTitle>Closed Trade History</SectionTitle>
-          {closed && closed.length > 0 && (
-            <div className="flex items-center gap-2 text-sm">
-              <Badge variant={totalRealized >= 0 ? "gain" : "loss"}>
-                {fmtUsd(totalRealized)} realized
-              </Badge>
-              <Badge variant="muted">{fmtPct(winRate, 0)} win rate</Badge>
-            </div>
-          )}
-        </div>
+        <SectionTitle
+          action={
+            closed && closed.length > 0 ? (
+              <div className="flex items-center gap-2 text-sm">
+                <Badge variant={totalRealized >= 0 ? "gain" : "loss"}>
+                  {fmtUsd(totalRealized)} realized
+                </Badge>
+                <Badge variant="muted">{fmtPct(winRate, 0)} win rate</Badge>
+              </div>
+            ) : null
+          }
+        >
+          Closed Trade History
+        </SectionTitle>
         <Card>
           <CardContent className="p-0">
             {closed && closed.length > 0 ? (
-              <div className="overflow-x-auto scrollbar-thin">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-3">Ticker</th>
-                      <th className="px-4 py-3">Strategy</th>
-                      <th className="px-4 py-3">Exit Date</th>
-                      <th className="px-4 py-3 text-right">IV @ Close</th>
-                      <th className="px-4 py-3 text-right">Max Loss</th>
-                      <th className="px-4 py-3 text-right">Realized P&L</th>
+              <TableWrap maxHeight={520}>
+                <Table>
+                  <TableHeader>
+                    <tr>
+                      <TableHead sortKey="ticker" {...sortProps}>
+                        Ticker
+                      </TableHead>
+                      <TableHead sortKey="strategy" {...sortProps}>
+                        Strategy
+                      </TableHead>
+                      <TableHead sortKey="exit" {...sortProps}>
+                        Exit Date
+                      </TableHead>
+                      <TableHead right sortKey="iv" {...sortProps}>
+                        IV @ Close
+                      </TableHead>
+                      <TableHead right sortKey="maxLoss" {...sortProps}>
+                        Max Loss
+                      </TableHead>
+                      <TableHead right sortKey="pnl" {...sortProps}>
+                        Realized P&L
+                      </TableHead>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {closed.map((t) => (
-                      <tr key={t.id} className="border-b border-border/50 last:border-0">
-                        <td className="px-4 py-3 font-medium">{t.ticker}</td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                  </TableHeader>
+                  <TableBody>
+                    {sorted.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="font-medium">{t.ticker}</TableCell>
+                        <TableCell className="text-muted-foreground">
                           {TRADE_TYPE_LABELS[t.trade_type as TradeType] ?? t.trade_type}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
                           {t.exit_date
                             ? format(new Date(t.exit_date), "MMM d, yyyy")
                             : "—"}
-                        </td>
-                        <td className="px-4 py-3 text-right tnum">
+                        </TableCell>
+                        <TableCell right>
                           {fmtPct((t.iv_at_close ?? 0) * 100, 1)}
-                        </td>
-                        <td className="px-4 py-3 text-right tnum text-muted-foreground">
+                        </TableCell>
+                        <TableCell right className="text-muted-foreground">
                           {fmtUsd(t.max_loss)}
-                        </td>
-                        <td
-                          className={`px-4 py-3 text-right font-semibold tnum ${pnlClass(t.realized_pnl ?? 0)}`}
+                        </TableCell>
+                        <TableCell
+                          right
+                          className={`font-semibold ${pnlClass(t.realized_pnl ?? 0)}`}
                         >
                           {fmtUsd(t.realized_pnl)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </TableBody>
+                </Table>
+              </TableWrap>
             ) : (
               <div className="p-5">
                 <EmptyState

@@ -1,17 +1,10 @@
 import { useMemo } from "react";
-import type { Data, Layout } from "plotly.js-dist-min";
-import { Chart } from "@/components/charts/Chart";
-import { baseLayout, baseConfig } from "@/components/charts/theme";
+import type { EChartsOption } from "echarts";
+import { EChart } from "@/components/charts/EChart";
+import { CHART_COLORS, CHART_SURFACE } from "@/components/charts/theme";
+import { IV_SEQUENTIAL, categoryAxis } from "@/components/charts/echartsTheme";
 import { BUCKET_ORDER, bucketLabel } from "@/api/ivSurface";
 import type { SurfaceExpiration } from "@/api/ivSurface";
-
-// Sequential blue ramp (single hue, monotone lightness on the dark surface):
-// dark navy = low IV, near-white steel = high IV.
-const IV_COLORSCALE: Array<[number, string]> = [
-  [0, "#0b3a5c"],
-  [0.5, "#1f9bdb"],
-  [1, "#dfe7ef"],
-];
 
 /**
  * The surface itself: expiration × delta-bucketed strike, color = IV. Delta
@@ -25,59 +18,78 @@ export function IvHeatmap({
   expirations: SurfaceExpiration[];
   height?: number;
 }) {
-  const { data, layout } = useMemo(() => {
+  const option = useMemo<EChartsOption>(() => {
     const x = expirations.map((e) => `${e.expiration.slice(5)} · ${e.dte}d`);
     const y = BUCKET_ORDER.map(bucketLabel);
 
-    const z: (number | null)[][] = [];
-    const text: string[][] = [];
-    for (const b of BUCKET_ORDER) {
-      const zRow: (number | null)[] = [];
-      const tRow: string[] = [];
-      for (const e of expirations) {
-        const hit = e.buckets.find((r) => r.b === b);
-        zRow.push(hit ? +(hit.iv * 100).toFixed(2) : null);
-        tRow.push(
-          hit
-            ? `${e.expiration} · ${bucketLabel(b)}<br>strike $${hit.strike} (Δ ${hit.delta.toFixed(2)})` +
-                `<br>IV ${(hit.iv * 100).toFixed(2)}% · mid $${hit.mid.toFixed(2)}`
-            : `${e.expiration} · ${bucketLabel(b)}<br>no quotable contract`,
-        );
-      }
-      z.push(zRow);
-      text.push(tRow);
-    }
+    // ECharts heatmap takes [xIndex, yIndex, value] triples. Cells with no
+    // quotable contract are omitted entirely rather than passed as null, so
+    // they render as empty rather than as the bottom of the color ramp.
+    const data: [number, number, number][] = [];
+    const tips = new Map<string, string>();
+    let min = Infinity;
+    let max = -Infinity;
 
-    const data: Data[] = [
-      {
-        type: "heatmap",
-        x,
-        y,
-        z,
-        text: text as unknown as string[],
-        hovertemplate: "%{text}<extra></extra>",
-        colorscale: IV_COLORSCALE,
-        xgap: 2,
-        ygap: 2,
-        colorbar: {
-          ticksuffix: "%",
-          thickness: 10,
-          outlinewidth: 0,
-          tickfont: { size: 10, color: "#7a8699" },
+    BUCKET_ORDER.forEach((b, yi) => {
+      expirations.forEach((e, xi) => {
+        const hit = e.buckets.find((r) => r.b === b);
+        if (hit) {
+          const iv = +(hit.iv * 100).toFixed(2);
+          data.push([xi, yi, iv]);
+          if (iv < min) min = iv;
+          if (iv > max) max = iv;
+          tips.set(
+            `${xi}:${yi}`,
+            `${e.expiration} · ${bucketLabel(b)}<br/>strike $${hit.strike} (Δ ${hit.delta.toFixed(2)})` +
+              `<br/>IV ${iv.toFixed(2)}% · mid $${hit.mid.toFixed(2)}`,
+          );
+        }
+      });
+    });
+
+    return {
+      // Right margin reserves room for the visualMap bar and its tick labels;
+      // unlike Plotly's colorbar it is not auto-placed outside the plot.
+      grid: { left: 56, right: 66, top: 12, bottom: 76, containLabel: true },
+      xAxis: {
+        ...categoryAxis(),
+        data: x,
+        axisLabel: { color: CHART_COLORS.muted, fontSize: 10, rotate: -40 },
+      },
+      yAxis: { ...categoryAxis(), data: y },
+      tooltip: {
+        trigger: "item",
+        formatter: (p: unknown) => {
+          const d = p as { value: [number, number, number] };
+          return tips.get(`${d.value[0]}:${d.value[1]}`) ?? "";
         },
       },
-    ];
-
-    const layout: Partial<Layout> = {
-      ...baseLayout,
-      height,
-      margin: { l: 56, r: 8, t: 8, b: 64 },
-      xaxis: { ...baseLayout.xaxis, type: "category", tickangle: -40 },
-      yaxis: { ...baseLayout.yaxis, type: "category" },
+      visualMap: {
+        type: "continuous",
+        min: Number.isFinite(min) ? min : 0,
+        max: Number.isFinite(max) ? max : 100,
+        calculable: true,
+        orient: "vertical",
+        right: 4,
+        top: "middle",
+        itemWidth: 10,
+        itemHeight: 160,
+        precision: 1,
+        textStyle: { color: CHART_COLORS.muted, fontSize: 10 },
+        formatter: (v: unknown) => `${Number(v).toFixed(0)}%`,
+        inRange: { color: IV_SEQUENTIAL },
+      },
+      series: [
+        {
+          type: "heatmap",
+          data,
+          itemStyle: { borderColor: CHART_SURFACE, borderWidth: 2 },
+          emphasis: { itemStyle: { borderColor: CHART_COLORS.text, borderWidth: 1.5 } },
+        },
+      ],
     };
-    return { data, layout };
-  }, [expirations, height]);
+  }, [expirations]);
 
   if (!expirations.length) return null;
-  return <Chart data={data} layout={layout} config={baseConfig} height={height} />;
+  return <EChart option={option} height={height} />;
 }

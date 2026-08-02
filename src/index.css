@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -16,8 +14,11 @@
     --popover: 222 24% 8%;
     --popover-foreground: 210 20% 92%;
 
-    --primary: 201 90% 43%;
-    --primary-foreground: 0 0% 100%;
+    /* Solid fills carry DARK text, not white: white on this blue is only
+       3.7:1, while the near-black foreground below is 6.2:1. Keeps the accent
+       vivid instead of muddying it to pass contrast. */
+    --primary: 201 90% 48%;
+    --primary-foreground: 222 30% 8%;
 
     --secondary: 217 19% 16%;
     --secondary-foreground: 210 20% 92%;
@@ -31,15 +32,31 @@
     --destructive: 0 72% 42%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 217 19% 18%;
-    --input: 217 19% 18%;
-    --ring: 201 90% 50%;
+    --border: 217 19% 24%;
+    --input: 217 19% 24%;
+    --ring: 201 90% 55%;
 
+    /* Text-on-card semantics: both clear 4.5:1 against --card. */
     --gain: 158 64% 42%;
-    --loss: 0 72% 51%;
-    --brand: 201 90% 43%;
+    --loss: 0 74% 62%;
+    --gain-foreground: 222 30% 8%;
+    --loss-foreground: 222 30% 8%;
+    --brand: 201 90% 48%;
 
     --radius: 0.6rem;
+
+    /* Elevation — tuned for a near-black canvas, where diffuse shadow reads
+       better than the light-theme defaults Tailwind ships. */
+    --shadow-sm: 0 1px 2px 0 hsl(222 40% 2% / 0.5);
+    --shadow-md: 0 2px 6px -1px hsl(222 40% 2% / 0.55), 0 1px 3px -1px hsl(222 40% 2% / 0.4);
+    --shadow-lg: 0 10px 24px -6px hsl(222 40% 2% / 0.7), 0 2px 6px -2px hsl(222 40% 2% / 0.5);
+    --shadow-glow: 0 0 0 1px hsl(var(--primary) / 0.35), 0 6px 20px -6px hsl(var(--primary) / 0.45);
+
+    /* Motion — one easing curve and three durations across the whole app. */
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 120ms;
+    --dur-base: 200ms;
+    --dur-slow: 320ms;
   }
 }
 
@@ -55,6 +72,28 @@
   .tnum {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Honour the OS "reduce motion" setting everywhere at once, so individual
+     components never have to remember to opt out. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Declared here rather than relying on Tailwind's keyframes config: Tailwind
+   only emits those when a matching animate-* utility is present in the markup,
+   and .skeleton references the animation from raw CSS. */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @layer utilities {
@@ -69,6 +108,26 @@
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--border));
     border-radius: 9999px;
+  }
+  /* Sweeping highlight for loading placeholders — reads as "content pending"
+     far better than a collapsed spinner, and holds the layout height. */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: hsl(var(--muted) / 0.5);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
   }
   .glass {
     background: linear-gradient(

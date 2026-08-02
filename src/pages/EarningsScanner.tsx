@@ -11,9 +11,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Chart } from "@/components/charts/Chart";
+import { EChart } from "@/components/charts/EChart";
 import { CHART_COLORS } from "@/components/charts/theme";
-import { LoadingState, EmptyState, SectionTitle } from "@/components/ui/states";
+import { X_NAME_GAP, categoryAxis, valueAxis } from "@/components/charts/echartsTheme";
+import { EmptyState, SectionTitle, TableSkeleton } from "@/components/ui/states";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableWrap,
+} from "@/components/ui/table";
+import { useTableSort } from "@/hooks/useTableSort";
 import { useEarningsScan, useRescan, type ScanCandidate } from "@/api/earnings";
 import { useScannerFilterStore, type ScannerStructure } from "@/store/scannerFilter";
 import { useActivePortfolio } from "@/hooks/useActivePortfolio";
@@ -134,8 +145,8 @@ export default function EarningsScanner() {
       {/* header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Earnings Premium Scanner</h1>
-          <p className="text-xs text-muted-foreground">
+          {/* Title lives in the TopBar — this is the descriptive line only. */}
+          <p className="max-w-2xl text-xs text-muted-foreground">
             Upcoming earnings ranked as short {isCondor ? "iron-condor" : "iron-butterfly"}{" "}
             candidates — implied vs historical move, premium richness, and backtested per-ticker
             reliability.
@@ -220,7 +231,7 @@ export default function EarningsScanner() {
         </p>
       )}
 
-      {isLoading && <LoadingState label="Scanning upcoming earnings…" />}
+      {isLoading && <TableSkeleton rows={8} />}
       {isError && (
         <EmptyState title="Scan failed" hint={String((error as Error)?.message ?? error)} />
       )}
@@ -243,24 +254,41 @@ export default function EarningsScanner() {
           <SectionTitle>Tracked candidates ranked (confidence)</SectionTitle>
           <Card>
             <CardContent className="pt-5">
-              <Chart
+              <EChart
                 height={Math.max(260, chart.y.length * 26)}
-                data={[
-                  {
-                    type: "bar",
-                    orientation: "h",
-                    x: chart.x,
-                    y: chart.y,
-                    text: chart.text,
-                    textposition: "auto",
-                    marker: { color: chart.colors },
-                    hovertemplate: "%{y}: confidence %{x}<extra></extra>",
+                option={{
+                  grid: { left: 12, right: 24, top: 10, bottom: 40, containLabel: true },
+                  xAxis: { ...valueAxis("confidence"), min: 0, max: 100, nameGap: X_NAME_GAP },
+                  // `chart` is already built ascending so the best candidate
+                  // lands at the top; ECharts renders category 0 at the bottom,
+                  // same as Plotly did, so no further reordering here.
+                  yAxis: { ...categoryAxis(), data: chart.y },
+                  tooltip: {
+                    trigger: "item",
+                    formatter: (p: unknown) => {
+                      const d = p as { name: string; value: number };
+                      return `${d.name}: confidence ${d.value}`;
+                    },
                   },
-                ]}
-                layout={{
-                  margin: { l: 64, r: 16, t: 8, b: 32 },
-                  xaxis: { title: { text: "confidence" }, range: [0, 100] },
-                  yaxis: { automargin: true },
+                  series: [
+                    {
+                      type: "bar",
+                      data: chart.x.map((v, i) => ({
+                        value: v,
+                        itemStyle: {
+                          color: chart.colors[i],
+                          borderRadius: [0, 3, 3, 0],
+                        },
+                      })),
+                      barCategoryGap: "30%",
+                      label: {
+                        show: true,
+                        position: "insideRight",
+                        color: CHART_COLORS.text,
+                        fontSize: 10,
+                      },
+                    },
+                  ],
                 }}
               />
             </CardContent>
@@ -306,42 +334,80 @@ export default function EarningsScanner() {
 }
 
 function ResultsTable({ rows, structure }: { rows: Viewed[]; structure: ScannerStructure }) {
+  const { sorted, sortKey, dir, onSort } = useTableSort(rows, {
+    // Matches the incoming rank, so the default view is unchanged until the
+    // user clicks a header.
+    initialKey: "conf",
+    initialDir: "desc",
+    accessors: {
+      ticker: ({ r }) => r.ticker,
+      earnings: ({ r }) => r.earningsDate,
+      implied: ({ r }) => r.impliedMovePct,
+      hist: ({ r }) => r.histMovePct,
+      rich: ({ r }) => r.premiumRichness,
+      iv: ({ r }) => r.atmIvPct,
+      win: ({ v }) => v.winPct,
+      maxGain: ({ v }) => v.maxGain,
+      maxLoss: ({ v }) => v.maxLoss,
+      conf: ({ v }) => v.confidence,
+    },
+  });
+  const sortProps = { activeKey: sortKey, dir, onSort };
+
   return (
     <Card>
-      <CardContent className="overflow-x-auto p-0">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-[0.7rem] uppercase tracking-wide text-muted-foreground">
-              <Th>Ticker</Th>
-              <Th>Earnings</Th>
-              <Th right>Implied</Th>
-              <Th right>Hist avg</Th>
-              <Th right>Rich</Th>
-              <Th right>IV</Th>
-              <Th right>Hist win</Th>
-              <Th>
-                {structure === "condor"
-                  ? "Iron condor (wings / shorts)"
-                  : "Iron butterfly (short / wings)"}
-              </Th>
-              <Th right>Max gain</Th>
-              <Th right>Max loss</Th>
-              <Th right>Conf</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ r, v }) => (
-              <Row key={r.ticker} r={r} v={v} structure={structure} />
-            ))}
-          </tbody>
-        </table>
+      <CardContent className="p-0">
+        <TableWrap maxHeight={620}>
+          <Table>
+            <TableHeader>
+              <tr>
+                <TableHead sortKey="ticker" {...sortProps}>
+                  Ticker
+                </TableHead>
+                <TableHead sortKey="earnings" {...sortProps}>
+                  Earnings
+                </TableHead>
+                <TableHead right sortKey="implied" {...sortProps}>
+                  Implied
+                </TableHead>
+                <TableHead right sortKey="hist" {...sortProps}>
+                  Hist avg
+                </TableHead>
+                <TableHead right sortKey="rich" {...sortProps}>
+                  Rich
+                </TableHead>
+                <TableHead right sortKey="iv" {...sortProps}>
+                  IV
+                </TableHead>
+                <TableHead right sortKey="win" {...sortProps}>
+                  Hist win
+                </TableHead>
+                <TableHead>
+                  {structure === "condor"
+                    ? "Iron condor (wings / shorts)"
+                    : "Iron butterfly (short / wings)"}
+                </TableHead>
+                <TableHead right sortKey="maxGain" {...sortProps}>
+                  Max gain
+                </TableHead>
+                <TableHead right sortKey="maxLoss" {...sortProps}>
+                  Max loss
+                </TableHead>
+                <TableHead right sortKey="conf" {...sortProps}>
+                  Conf
+                </TableHead>
+              </tr>
+            </TableHeader>
+            <TableBody>
+              {sorted.map(({ r, v }) => (
+                <Row key={r.ticker} r={r} v={v} structure={structure} />
+              ))}
+            </TableBody>
+          </Table>
+        </TableWrap>
       </CardContent>
     </Card>
   );
-}
-
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
-  return <th className={`px-3 py-2 font-medium ${right ? "text-right" : ""}`}>{children}</th>;
 }
 
 function StrikeCell({ r, structure }: { r: ScanCandidate; structure: ScannerStructure }) {
@@ -382,48 +448,52 @@ function StrikeCell({ r, structure }: { r: ScanCandidate; structure: ScannerStru
 function Row({ r, v, structure }: { r: ScanCandidate; v: StructView; structure: ScannerStructure }) {
   const rich = r.premiumRichness;
   return (
-    <tr className="border-b border-border/50 hover:bg-accent/30">
-      <td className="px-3 py-2.5 font-semibold">
+    <TableRow>
+      <TableCell className="font-semibold">
         {r.ticker}
         {!r.hasHistory && (
           <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[0.55rem] font-medium uppercase tracking-wide text-amber-500">
             no hist
           </span>
         )}
-      </td>
-      <td className="px-3 py-2.5 text-xs">
+      </TableCell>
+      <TableCell className="text-xs">
         {r.earningsDate}
         <span className="ml-1 rounded bg-muted px-1 py-0.5 text-[0.6rem] text-muted-foreground">
           {r.when}
         </span>
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums">{r.impliedMovePct}%</td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+      </TableCell>
+      <TableCell right>{r.impliedMovePct}%</TableCell>
+      <TableCell right className="text-muted-foreground">
         {r.histMovePct != null ? `${r.histMovePct}%` : "—"}
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums">
+      </TableCell>
+      <TableCell right>
         {rich != null ? (
           <span className={rich >= 1 ? "text-gain" : "text-loss"}>{rich.toFixed(2)}×</span>
         ) : (
           "—"
         )}
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{r.atmIvPct}%</td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+      </TableCell>
+      <TableCell right className="text-muted-foreground">
+        {r.atmIvPct}%
+      </TableCell>
+      <TableCell right className="text-muted-foreground">
         {v.winPct != null ? `${v.winPct}% · n${v.sampleN}` : "—"}
-      </td>
-      <td className="px-3 py-2.5 text-xs">
+      </TableCell>
+      <TableCell className="text-xs">
         <StrikeCell r={r} structure={structure} />
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-gain">${v.maxGain}</td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-loss">
+      </TableCell>
+      <TableCell right className="text-gain">
+        ${v.maxGain}
+      </TableCell>
+      <TableCell right className="text-loss">
         <span className="inline-flex items-center gap-0.5">
           <TrendingDown className="h-3 w-3" />${v.maxLoss}
         </span>
-      </td>
-      <td className="px-3 py-2.5 text-right">
+      </TableCell>
+      <TableCell right>
         <Badge variant={confBadge(v.confidence)}>{v.confidence}</Badge>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }

@@ -18,20 +18,26 @@ export function TradeCard({ position }: { position: Position }) {
   const { trade, metrics } = position;
   const [editOpen, setEditOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
-  const [realized, setRealized] = useState(metrics.expectedProfit);
+  // Kept as a raw string so the field can be emptied — parsing on every
+  // keystroke turns "" into 0 and makes the placeholder zero undeletable.
+  const [realized, setRealized] = useState(String(metrics.expectedProfit));
+
+  const realizedNum = Number(realized);
+  const realizedValid = realized.trim() !== "" && Number.isFinite(realizedNum);
 
   const archive = useArchiveTrade();
   const del = useDeleteTrade();
 
   const handleArchive = async () => {
+    if (!realizedValid) return;
     try {
       await archive.mutateAsync({
         trade,
-        realizedPnl: realized,
+        realizedPnl: realizedNum,
         maxLoss: metrics.maxLoss,
         value: metrics.value,
       });
-      toast.success(`Archived ${trade.ticker}`, `${fmtUsd(realized)} realized`);
+      toast.success(`Archived ${trade.ticker}`, `${fmtUsd(realizedNum)} realized`);
       setCloseOpen(false);
     } catch (e) {
       toast.error("Archive failed", String((e as Error).message));
@@ -49,7 +55,7 @@ export function TradeCard({ position }: { position: Position }) {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card/60 p-3.5 transition-colors hover:border-border/80">
+    <div className="rounded-lg border border-border bg-card/60 p-3.5 transition-[border-color,box-shadow,transform] duration-base ease-out hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -104,7 +110,13 @@ export function TradeCard({ position }: { position: Position }) {
         >
           <Pencil className="h-3.5 w-3.5" /> Edit
         </Button>
-        <Popover open={closeOpen} onOpenChange={setCloseOpen}>
+        <Popover
+          open={closeOpen}
+          onOpenChange={(open) => {
+            if (open) setRealized(String(metrics.expectedProfit));
+            setCloseOpen(open);
+          }}
+        >
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="flex-1">
               <X className="h-3.5 w-3.5" /> Close
@@ -117,16 +129,22 @@ export function TradeCard({ position }: { position: Position }) {
               <Input
                 type="number"
                 step="any"
+                inputMode="decimal"
+                placeholder="0.00"
                 value={realized}
-                onChange={(e) => setRealized(Number(e.target.value))}
+                onChange={(e) => setRealized(e.target.value)}
+                aria-invalid={!realizedValid}
               />
+              {!realizedValid && (
+                <p className="text-[0.7rem] text-loss">Enter a realized P&L to archive.</p>
+              )}
             </div>
             <Button
               variant="success"
               size="sm"
               className="mt-3 w-full"
               onClick={handleArchive}
-              disabled={archive.isPending}
+              disabled={archive.isPending || !realizedValid}
             >
               Archive to History
             </Button>
