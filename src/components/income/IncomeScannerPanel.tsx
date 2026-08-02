@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { NumberInput } from "@/components/ui/number-input";
-import { EmptyState, LoadingState } from "@/components/ui/states";
+import { EmptyState, TableSkeleton } from "@/components/ui/states";
 import { toast } from "@/components/ui/toast";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { fmtUsd, fmtPct, fmtMultiple } from "@/lib/format";
@@ -15,8 +15,22 @@ import {
   useIncomeScan,
   useIncomeRescan,
   rankCandidates,
+  type DivRating,
   type IncomeCandidate,
 } from "@/api/income";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableWrap,
+} from "@/components/ui/table";
+import { useTableSort } from "@/hooks/useTableSort";
+
+/** Ranks the qualitative diversification grade so the column can sort. */
+const RATING_ORDER: Record<DivRating, number> = { Poor: 0, Good: 1, Excellent: 2 };
 
 function Slider({
   label,
@@ -69,6 +83,24 @@ export function IncomeScannerPanel({
     () => rankCandidates(scan.data, { maxPrice, targetDelta, targetDte, sectorWeights }),
     [scan.data, maxPrice, targetDelta, targetDte, sectorWeights],
   );
+
+  const { sorted, sortKey, dir, onSort } = useTableSort(candidates, {
+    initialKey: "annRoc",
+    initialDir: "desc",
+    accessors: {
+      ticker: (c) => c.ticker,
+      sector: (c) => c.sector,
+      spot: (c) => c.spot,
+      strike: (c) => c.strike,
+      delta: (c) => c.delta,
+      ivHv: (c) => c.ivHv,
+      credit: (c) => c.premium,
+      annRoc: (c) => c.annRoc,
+      collateral: (c) => c.collateral,
+      rating: (c) => RATING_ORDER[c.rating] ?? -1,
+    },
+  });
+  const sortProps = { activeKey: sortKey, dir, onSort };
 
   const refresh = () => {
     if (!isSupabaseConfigured) {
@@ -145,7 +177,7 @@ export function IncomeScannerPanel({
       )}
 
       {scan.isLoading ? (
-        <LoadingState label="Loading option chains…" />
+        <TableSkeleton rows={8} />
       ) : scan.isError ? (
         <EmptyState
           title="Scan unavailable"
@@ -157,50 +189,72 @@ export function IncomeScannerPanel({
           hint="Loosen the price cap or delta/DTE targets, or refresh the chain."
         />
       ) : (
-        <div className="overflow-x-auto scrollbar-thin">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-4">Ticker</th>
-                <th className="py-2 pr-4">Sector</th>
-                <th className="py-2 pr-4 text-right">Spot</th>
-                <th className="py-2 pr-4 text-right">Put / Exp</th>
-                <th className="py-2 pr-4 text-right">Δ</th>
-                <th className="py-2 pr-4 text-right">IV / HV</th>
-                <th className="py-2 pr-4 text-right">Credit</th>
-                <th className="py-2 pr-4 text-right">Ann. ROC</th>
-                <th className="py-2 pr-4 text-right">Collateral</th>
-                <th className="py-2 pr-4 text-right">Diversification</th>
-                <th className="py-2 text-right">Sandbox</th>
+        <TableWrap maxHeight={560}>
+          <Table>
+            <TableHeader>
+              <tr>
+                <TableHead sortKey="ticker" {...sortProps}>
+                  Ticker
+                </TableHead>
+                <TableHead sortKey="sector" {...sortProps}>
+                  Sector
+                </TableHead>
+                <TableHead right sortKey="spot" {...sortProps}>
+                  Spot
+                </TableHead>
+                <TableHead right sortKey="strike" {...sortProps}>
+                  Put / Exp
+                </TableHead>
+                <TableHead right sortKey="delta" {...sortProps}>
+                  Δ
+                </TableHead>
+                <TableHead right sortKey="ivHv" {...sortProps}>
+                  IV / HV
+                </TableHead>
+                <TableHead right sortKey="credit" {...sortProps}>
+                  Credit
+                </TableHead>
+                <TableHead right sortKey="annRoc" {...sortProps}>
+                  Ann. ROC
+                </TableHead>
+                <TableHead right sortKey="collateral" {...sortProps}>
+                  Collateral
+                </TableHead>
+                <TableHead right sortKey="rating" {...sortProps}>
+                  Diversification
+                </TableHead>
+                <TableHead right>Sandbox</TableHead>
               </tr>
-            </thead>
-            <tbody>
-              {candidates.map((c) => (
-                <tr key={c.ticker} className="border-b border-border/40 last:border-0">
-                  <td className="py-2 pr-4 font-medium">{c.ticker}</td>
-                  <td className="py-2 pr-4 text-muted-foreground">{c.sector}</td>
-                  <td className="py-2 pr-4 text-right tnum">{fmtUsd(c.spot)}</td>
-                  <td className="py-2 pr-4 text-right tnum">
+            </TableHeader>
+            <TableBody>
+              {sorted.map((c) => (
+                <TableRow key={c.ticker}>
+                  <TableCell className="font-medium">{c.ticker}</TableCell>
+                  <TableCell className="text-muted-foreground">{c.sector}</TableCell>
+                  <TableCell right>{fmtUsd(c.spot)}</TableCell>
+                  <TableCell right>
                     ${c.strike}
                     <span className="block text-xs text-muted-foreground">
                       {c.expiration} · {c.dte}d
                     </span>
-                  </td>
-                  <td className="py-2 pr-4 text-right tnum">{c.delta.toFixed(2)}</td>
-                  <td className="py-2 pr-4 text-right tnum">
+                  </TableCell>
+                  <TableCell right>{c.delta.toFixed(2)}</TableCell>
+                  <TableCell right>
                     {fmtMultiple(c.ivHv)}
                     <span className="block text-xs text-muted-foreground">
                       {fmtPct(c.iv * 100, 0)} / {fmtPct(c.hv * 100, 0)}
                     </span>
-                  </td>
-                  <td className="py-2 pr-4 text-right tnum text-gain">{fmtUsd(c.premium)}</td>
-                  <td className="py-2 pr-4 text-right tnum font-semibold text-gain">
+                  </TableCell>
+                  <TableCell right className="text-gain">
+                    {fmtUsd(c.premium)}
+                  </TableCell>
+                  <TableCell right className="font-semibold text-gain">
                     {fmtPct(c.annRoc * 100, 1)}
-                  </td>
-                  <td className="py-2 pr-4 text-right tnum text-muted-foreground">
+                  </TableCell>
+                  <TableCell right className="text-muted-foreground">
                     {fmtUsd(c.collateral, true)}
-                  </td>
-                  <td className="py-2 pr-4 text-right">
+                  </TableCell>
+                  <TableCell right>
                     <Badge
                       variant={
                         c.rating === "Excellent" ? "gain" : c.rating === "Good" ? "muted" : "loss"
@@ -208,8 +262,8 @@ export function IncomeScannerPanel({
                     >
                       {c.rating}
                     </Badge>
-                  </td>
-                  <td className="py-2 text-right">
+                  </TableCell>
+                  <TableCell right>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -218,12 +272,12 @@ export function IncomeScannerPanel({
                     >
                       View <ArrowUpRight className="h-3.5 w-3.5" />
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </TableWrap>
       )}
     </div>
   );

@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import type { Data, Layout } from "plotly.js-dist-min";
-import { Chart } from "@/components/charts/Chart";
-import { CHART_COLORS, baseLayout, baseConfig } from "@/components/charts/theme";
+import type { EChartsOption } from "echarts";
+import { EChart } from "@/components/charts/EChart";
+import { CHART_COLORS } from "@/components/charts/theme";
+import { categoryAxis, valueAxis } from "@/components/charts/echartsTheme";
 import { BUCKET_ORDER, bucketLabel } from "@/api/ivSurface";
 import type { SurfaceExpiration } from "@/api/ivSurface";
 
@@ -20,7 +21,7 @@ export function PairDiffChart({
   back: SurfaceExpiration;
   height?: number;
 }) {
-  const { data, layout } = useMemo(() => {
+  const option = useMemo<EChartsOption>(() => {
     const x: string[] = [];
     const yPts: number[] = [];
     const text: string[] = [];
@@ -32,42 +33,40 @@ export function PairDiffChart({
       x.push(bucketLabel(b));
       yPts.push(+diff.toFixed(2));
       text.push(
-        `${bucketLabel(b)}<br>front ${front.expiration}: ${(f.iv * 100).toFixed(2)}% ($${f.strike})` +
-          `<br>back ${back.expiration}: ${(bk.iv * 100).toFixed(2)}% ($${bk.strike})` +
-          `<br>differential ${diff >= 0 ? "+" : ""}${diff.toFixed(2)} pts`,
+        `${bucketLabel(b)}<br/>front ${front.expiration}: ${(f.iv * 100).toFixed(2)}% ($${f.strike})` +
+          `<br/>back ${back.expiration}: ${(bk.iv * 100).toFixed(2)}% ($${bk.strike})` +
+          `<br/>differential ${diff >= 0 ? "+" : ""}${diff.toFixed(2)} pts`,
       );
     }
 
-    const data: Data[] = [
-      {
-        type: "bar",
-        x,
-        y: yPts,
-        customdata: text,
-        hovertemplate: "%{customdata}<extra></extra>",
-        marker: {
-          color: yPts.map((v) => (v >= 0 ? CHART_COLORS.gain : CHART_COLORS.loss)),
-          line: { width: 0 },
+    return {
+      grid: { left: 48, right: 12, top: 12, bottom: 40, containLabel: true },
+      xAxis: { ...categoryAxis(), data: x },
+      yAxis: valueAxis(undefined, (v: number) => `${v.toFixed(1)} pt`),
+      tooltip: {
+        trigger: "item",
+        formatter: (p: unknown) => text[(p as { dataIndex: number }).dataIndex],
+      },
+      series: [
+        {
+          type: "bar",
+          data: yPts.map((v) => ({
+            value: v,
+            itemStyle: { color: v >= 0 ? CHART_COLORS.gain : CHART_COLORS.loss },
+          })),
+          barCategoryGap: "25%",
+          // Plotly drew a zero line via the axis; ECharts needs it explicit.
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { show: false },
+            lineStyle: { color: CHART_COLORS.zeroLine, width: 1 },
+            data: [{ yAxis: 0 }],
+          },
         },
-      },
-    ];
-
-    const layout: Partial<Layout> = {
-      ...baseLayout,
-      height,
-      margin: { l: 48, r: 12, t: 8, b: 40 },
-      showlegend: false,
-      bargap: 0.25,
-      xaxis: { ...baseLayout.xaxis, type: "category" },
-      yaxis: {
-        ...baseLayout.yaxis,
-        ticksuffix: " pt",
-        zeroline: true,
-        zerolinecolor: CHART_COLORS.zeroLine,
-      },
+      ],
     };
-    return { data, layout };
-  }, [front, back, height]);
+  }, [front, back]);
 
-  return <Chart data={data} layout={layout} config={baseConfig} height={height} />;
+  return <EChart option={option} height={height} />;
 }

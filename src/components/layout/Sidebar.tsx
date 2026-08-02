@@ -59,15 +59,34 @@ export function Sidebar() {
             end={end}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium",
+                "transition-[background-color,color] duration-fast ease-out",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 isActive
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
               )
             }
           >
-            <Icon className="h-4 w-4" />
-            {label}
+            {({ isActive }) => (
+              <>
+                {/* Active rail — anchors the eye to the current section. */}
+                <span
+                  className={cn(
+                    "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-primary",
+                    "transition-opacity duration-fast ease-out",
+                    isActive ? "opacity-100" : "opacity-0",
+                  )}
+                />
+                <Icon
+                  className={cn(
+                    "h-4 w-4 transition-transform duration-fast ease-out",
+                    !isActive && "group-hover:scale-110",
+                  )}
+                />
+                {label}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
@@ -75,14 +94,14 @@ export function Sidebar() {
       <div className="border-t border-border p-3">
         <button
           onClick={() => setAccountOpen(true)}
-          className="mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-muted-foreground transition-colors duration-fast ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <UserCog className="h-4 w-4 shrink-0" />
           <span className="truncate">{user?.email}</span>
         </button>
         <button
           onClick={() => signOut()}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors duration-fast ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <LogOut className="h-4 w-4" />
           Sign out

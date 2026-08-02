@@ -3,9 +3,20 @@ import { Rocket, RotateCcw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Metric } from "@/components/ui/metric";
 import { Button } from "@/components/ui/button";
-import { Chart } from "@/components/charts/Chart";
+import type { EChartsOption } from "echarts";
+import { EChart } from "@/components/charts/EChart";
 import { CHART_COLORS } from "@/components/charts/theme";
+import { X_NAME_GAP, axisUsd, tipUsd, valueAxis } from "@/components/charts/echartsTheme";
 import { SectionTitle } from "@/components/ui/states";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableWrap,
+} from "@/components/ui/table";
 import { toast } from "@/components/ui/toast";
 import { TradeFields, type TradeDraft } from "@/components/trades/TradeFields";
 import { useTradeSandboxStore, SANDBOX_TTL } from "@/store/tradeSandbox";
@@ -93,6 +104,90 @@ export default function TradeAnalysis() {
     return { prices, pnl, density, S0 };
   }, [trade, hasPrice, metrics?.dte]);
 
+  const payoffOption = useMemo<EChartsOption>(() => {
+    if (!payoff) return {};
+    return {
+      grid: { left: 58, right: 20, top: 32, bottom: 44, containLabel: true },
+      legend: { top: 0, left: 0 },
+      xAxis: {
+        ...valueAxis("Underlying Price ($)", axisUsd),
+        nameGap: X_NAME_GAP,
+        min: payoff.prices[0],
+        max: payoff.prices[payoff.prices.length - 1],
+      },
+      // Two y-axes: P&L on the left, the probability density overlaid and
+      // hidden on the right — it shares the x range but not the scale.
+      yAxis: [
+        valueAxis("P&L ($)", axisUsd),
+        {
+          type: "value" as const,
+          show: false,
+          splitLine: { show: false },
+          // `show: false` hides the axis but not its crosshair readout, which
+          // leaked a raw density value onto the right edge.
+          axisPointer: { show: false },
+        },
+      ],
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "cross" },
+        // Density is an unlabelled shape cue, not a figure worth reading.
+        formatter: (params: unknown) => {
+          const arr = params as Array<{
+            seriesName: string;
+            value: [number, number];
+            marker: string;
+          }>;
+          const pnlPt = arr.find((p) => p.seriesName === "Payoff at Expiration");
+          if (!pnlPt) return "";
+          return (
+            `Underlying ${tipUsd(pnlPt.value[0])}<br/>` +
+            `${pnlPt.marker}P&L <b>${tipUsd(pnlPt.value[1])}</b>`
+          );
+        },
+      },
+      series: [
+        {
+          type: "line",
+          name: "Price Probability",
+          yAxisIndex: 1,
+          data: payoff.prices.map((p, i) => [p, payoff.density[i]]),
+          showSymbol: false,
+          lineStyle: { width: 0 },
+          areaStyle: { color: "rgba(34,192,138,0.18)" },
+          silent: true,
+          z: 1,
+        },
+        {
+          type: "line",
+          name: "Payoff at Expiration",
+          data: payoff.prices.map((p, i) => [p, payoff.pnl[i]]),
+          showSymbol: false,
+          lineStyle: { color: CHART_COLORS.brand, width: 3 },
+          itemStyle: { color: CHART_COLORS.brand },
+          z: 3,
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { show: false },
+            data: [
+              // Break-even.
+              {
+                yAxis: 0,
+                lineStyle: { color: "rgba(255,255,255,0.4)", width: 1, type: "dashed" },
+              },
+              // Spot at entry.
+              {
+                xAxis: payoff.S0,
+                lineStyle: { color: CHART_COLORS.amber, width: 1.5, type: "dotted" },
+              },
+            ],
+          },
+        },
+      ],
+    };
+  }, [payoff]);
+
   // Portfolio impact.
   const impact = useMemo(() => {
     if (!metrics) return null;
@@ -174,18 +269,21 @@ export default function TradeAnalysis() {
         {/* Inputs */}
         <Card className="h-fit">
           <CardContent className="pt-5">
-            <div className="mb-3 flex items-center justify-between">
-              <SectionTitle>Trade Configuration</SectionTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="-mt-2 h-7 text-xs text-muted-foreground"
-                onClick={reset}
-                title="Clear the sandbox draft"
-              >
-                <RotateCcw className="h-3.5 w-3.5" /> Reset
-              </Button>
-            </div>
+            <SectionTitle
+              action={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={reset}
+                  title="Clear the sandbox draft"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Reset
+                </Button>
+              }
+            >
+              Trade Configuration
+            </SectionTitle>
             <TradeFields draft={draft} onChange={setDraft} />
           </CardContent>
         </Card>
@@ -231,60 +329,7 @@ export default function TradeAnalysis() {
                   <Card>
                     <CardContent className="pt-5">
                       <SectionTitle>Payoff Diagram & Price Probability</SectionTitle>
-                      <Chart
-                        height={380}
-                        data={[
-                          {
-                            type: "scatter",
-                            mode: "lines",
-                            name: "Payoff at Expiration",
-                            x: payoff.prices,
-                            y: payoff.pnl,
-                            line: { color: CHART_COLORS.brand, width: 3 },
-                          },
-                          {
-                            type: "scatter",
-                            mode: "lines",
-                            name: "Price Probability",
-                            x: payoff.prices,
-                            y: payoff.density,
-                            yaxis: "y2",
-                            fill: "tozeroy",
-                            line: { color: "rgba(34,192,138,0.0)" },
-                            fillcolor: "rgba(34,192,138,0.18)",
-                          },
-                        ]}
-                        layout={{
-                          xaxis: { title: { text: "Underlying Price ($)" }, tickprefix: "$" },
-                          yaxis: { title: { text: "P&L ($)" }, tickprefix: "$" },
-                          yaxis2: {
-                            overlaying: "y",
-                            side: "right",
-                            showgrid: false,
-                            visible: false,
-                          },
-                          hovermode: "x unified",
-                          shapes: [
-                            {
-                              type: "line",
-                              x0: payoff.prices[0],
-                              x1: payoff.prices[payoff.prices.length - 1],
-                              y0: 0,
-                              y1: 0,
-                              line: { color: "rgba(255,255,255,0.4)", width: 1, dash: "dash" },
-                            },
-                            {
-                              type: "line",
-                              x0: payoff.S0,
-                              x1: payoff.S0,
-                              yref: "paper",
-                              y0: 0,
-                              y1: 1,
-                              line: { color: CHART_COLORS.amber, width: 1.5, dash: "dot" },
-                            },
-                          ],
-                        }}
-                      />
+                      <EChart height={380} option={payoffOption} />
                     </CardContent>
                   </Card>
                 )}
@@ -317,31 +362,32 @@ export default function TradeAnalysis() {
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Sector Exposure Shift
                       </p>
-                      <div className="overflow-x-auto scrollbar-thin">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                              <th className="py-2">Sector</th>
-                              <th className="py-2 text-right">Current</th>
-                              <th className="py-2 text-right">Simulated</th>
-                              <th className="py-2 text-right">Change</th>
+                      {/* Flush to the card's own padding, so no cell inset. */}
+                      <TableWrap>
+                        <Table className="[&_td]:px-0 [&_th]:px-0">
+                          <TableHeader>
+                            <tr>
+                              <TableHead>Sector</TableHead>
+                              <TableHead right>Current</TableHead>
+                              <TableHead right>Simulated</TableHead>
+                              <TableHead right>Change</TableHead>
                             </tr>
-                          </thead>
-                          <tbody>
+                          </TableHeader>
+                          <TableBody>
                             {impact.sectorRows.map((r) => (
-                              <tr key={r.sector} className="border-b border-border/40 last:border-0">
-                                <td className="py-2">{r.sector}</td>
-                                <td className="py-2 text-right tnum">{fmtPct(r.curPct, 1)}</td>
-                                <td className="py-2 text-right tnum">{fmtPct(r.simPct, 1)}</td>
-                                <td className={`py-2 text-right tnum ${pnlClass(r.change)}`}>
+                              <TableRow key={r.sector}>
+                                <TableCell>{r.sector}</TableCell>
+                                <TableCell right>{fmtPct(r.curPct, 1)}</TableCell>
+                                <TableCell right>{fmtPct(r.simPct, 1)}</TableCell>
+                                <TableCell right className={pnlClass(r.change)}>
                                   {r.change >= 0 ? "+" : ""}
                                   {r.change.toFixed(1)}%
-                                </td>
-                              </tr>
+                                </TableCell>
+                              </TableRow>
                             ))}
-                          </tbody>
-                        </table>
-                      </div>
+                          </TableBody>
+                        </Table>
+                      </TableWrap>
                     </CardContent>
                   </Card>
                 )}

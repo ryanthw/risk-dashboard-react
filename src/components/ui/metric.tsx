@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import NumberFlow, { type Format } from "@number-flow/react";
 import { cn } from "@/lib/cn";
 
 interface MetricProps {
@@ -9,6 +10,14 @@ interface MetricProps {
   deltaPositive?: boolean;
   className?: string;
   accent?: "default" | "gain" | "loss" | "primary";
+  /**
+   * Raw number behind `value`. When supplied the tile animates between values
+   * on refresh instead of snapping, which makes it obvious *which* figures
+   * actually moved. `value` is still the fallback for null/non-finite input.
+   */
+  animate?: number | null;
+  /** Intl options for the animated readout — should match `value`'s format. */
+  format?: Format;
 }
 
 /** Compact KPI tile used across the dashboard. */
@@ -20,11 +29,16 @@ export function Metric({
   deltaPositive,
   className,
   accent = "default",
+  animate,
+  format,
 }: MetricProps) {
+  const canAnimate = animate != null && Number.isFinite(animate);
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-card p-4 shadow-sm",
+        "group rounded-lg border border-border bg-card p-4 shadow-sm",
+        "transition-[border-color,box-shadow,transform] duration-base ease-out",
+        "hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg",
         className,
       )}
     >
@@ -39,7 +53,7 @@ export function Metric({
           accent === "primary" && "text-primary",
         )}
       >
-        {value}
+        {canAnimate ? <NumberFlow value={animate} format={format} /> : value}
       </p>
       {(hint || delta) && (
         <div className="mt-1 flex items-center gap-2">

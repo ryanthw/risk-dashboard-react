@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import type { Data, Layout, Shape, Annotations } from "plotly.js-dist-min";
-import { Chart } from "@/components/charts/Chart";
-import { CHART_COLORS, baseLayout, baseConfig } from "@/components/charts/theme";
+import type { EChartsOption } from "echarts";
+import { EChart } from "@/components/charts/EChart";
+import { CHART_COLORS } from "@/components/charts/theme";
+import { bandSeries, categoryAxis, valueAxis } from "@/components/charts/echartsTheme";
 import { macroEventsInWindow } from "@/lib/macroEvents";
 import type { SurfaceExpiration } from "@/api/ivSurface";
 
@@ -20,7 +21,7 @@ export function TermStructureStrip({
   spot: number;
   height?: number;
 }) {
-  const { data, layout } = useMemo(() => {
+  const option = useMemo<EChartsOption>(() => {
     const pts = expirations.filter((e) => e.atmIv > 0);
     const x = pts.map((e) => e.expiration);
     const atm = pts.map((e) => e.atmIv * 100);
@@ -31,88 +32,75 @@ export function TermStructureStrip({
     const hover = pts.map((e) => {
       const movePct = e.atmIv * Math.sqrt(Math.max(e.dte, 0) / 365);
       return (
-        `${e.expiration} · ${e.dte}d<br>ATM IV ${(e.atmIv * 100).toFixed(2)}%` +
-        `<br>±${(movePct * 100).toFixed(1)}% expected move` +
+        `${e.expiration} · ${e.dte}d<br/>ATM IV ${(e.atmIv * 100).toFixed(2)}%` +
+        `<br/>±${(movePct * 100).toFixed(1)}% expected move` +
         (spot > 0 ? ` (±$${(movePct * spot).toFixed(2)})` : "")
       );
     });
 
-    const data: Data[] = [
-      {
-        x,
-        y: call25,
-        type: "scatter",
-        mode: "lines",
-        line: { width: 0 },
-        hoverinfo: "skip",
-        showlegend: false,
-      },
-      {
-        x,
-        y: put25,
-        type: "scatter",
-        mode: "lines",
-        line: { width: 0 },
-        fill: "tonexty",
-        fillcolor: "rgba(31,155,219,0.14)",
-        name: "25Δ put–call band",
-        hoverinfo: "skip",
-        showlegend: false,
-      },
-      {
-        x,
-        y: atm,
-        type: "scatter",
-        mode: "lines+markers",
-        name: "ATM IV",
-        line: { color: CHART_COLORS.brand, width: 2 },
-        marker: { color: CHART_COLORS.brand, size: 8 },
-        text: hover,
-        hovertemplate: "%{text}<extra></extra>",
-      },
-    ];
-
-    // Event markers within the surface's date range.
-    const shapes: Partial<Shape>[] = [];
-    const annotations: Partial<Annotations>[] = [];
+    // Macro prints inside the surface's date range. The x axis is categorical
+    // (one slot per listed expiry), so each event is snapped to the first
+    // expiration at or after it — that is the expiry carrying its premium.
+    const eventLines: { xAxis: number; label: string }[] = [];
     if (x.length) {
       const today = new Date().toISOString().slice(0, 10);
       for (const ev of macroEventsInWindow(today, x[x.length - 1])) {
-        shapes.push({
-          type: "line",
-          xref: "x",
-          yref: "paper",
-          x0: ev.date,
-          x1: ev.date,
-          y0: 0,
-          y1: 1,
-          line: { color: CHART_COLORS.amber, width: 1, dash: "dot" },
-        });
-        annotations.push({
-          xref: "x",
-          yref: "paper",
-          x: ev.date,
-          y: 1.04,
-          text: ev.label,
-          showarrow: false,
-          font: { color: CHART_COLORS.amber, size: 10 },
-        });
+        const idx = x.findIndex((d) => d >= ev.date);
+        if (idx >= 0) eventLines.push({ xAxis: idx, label: ev.label });
       }
     }
 
-    const layout: Partial<Layout> = {
-      ...baseLayout,
-      height,
-      margin: { l: 48, r: 12, t: 28, b: 40 },
-      showlegend: false,
-      xaxis: { ...baseLayout.xaxis, type: "date", tickformat: "%b %d" },
-      yaxis: { ...baseLayout.yaxis, ticksuffix: "%" },
-      shapes,
-      annotations,
+    return {
+      grid: { left: 48, right: 12, top: 30, bottom: 40, containLabel: true },
+      xAxis: {
+        ...categoryAxis(),
+        data: x,
+        axisLabel: {
+          color: CHART_COLORS.muted,
+          fontSize: 11,
+          formatter: (v: string) => v.slice(5),
+        },
+      },
+      yAxis: valueAxis(undefined, (v: number) => `${v.toFixed(0)}%`),
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "line" },
+        formatter: (params: unknown) => {
+          const arr = params as Array<{ dataIndex: number }>;
+          return arr.length ? hover[arr[0].dataIndex] : "";
+        },
+      },
+      series: [
+        ...bandSeries(put25, call25),
+        {
+          type: "line",
+          name: "ATM IV",
+          data: atm,
+          symbolSize: 8,
+          lineStyle: { color: CHART_COLORS.brand, width: 2 },
+          itemStyle: { color: CHART_COLORS.brand },
+          z: 3,
+          markLine: {
+            silent: true,
+            symbol: "none",
+            lineStyle: { color: CHART_COLORS.amber, width: 1, type: "dotted" },
+            label: {
+              show: true,
+              // Above the plot, matching the old annotation placement — at
+              // "start" the labels landed on top of the x-axis tick text.
+              position: "end",
+              distance: 4,
+              color: CHART_COLORS.amber,
+              fontSize: 10,
+              formatter: (p: { name: string }) => p.name,
+            },
+            data: eventLines.map((e) => ({ xAxis: e.xAxis, name: e.label })),
+          },
+        },
+      ],
     };
-    return { data, layout };
-  }, [expirations, spot, height]);
+  }, [expirations, spot]);
 
   if (!expirations.length) return null;
-  return <Chart data={data} layout={layout} config={baseConfig} height={height} />;
+  return <EChart option={option} height={height} />;
 }

@@ -1,14 +1,33 @@
 import { useMemo } from "react";
+import type { Format } from "@number-flow/react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Metric, StatRow } from "@/components/ui/metric";
-import { EmptyState, LoadingState, NoPortfolio, SectionTitle } from "@/components/ui/states";
+import {
+  DashboardSkeleton,
+  EmptyState,
+  NoPortfolio,
+  SectionTitle,
+} from "@/components/ui/states";
 import { TradeCard } from "@/components/trades/TradeCard";
 import { AddTradeDialog } from "@/components/trades/AddTradeDialog";
 import { useActivePortfolio } from "@/hooks/useActivePortfolio";
 import { fmtUsd, fmtNum, fmtPct, fmtMultiple } from "@/lib/format";
 import * as P from "@/engine/portfolio";
+
+// Kept in sync with fmtUsd/fmtNum in lib/format so the animated readout and the
+// static fallback render identically.
+const USD_FMT: Format = {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+};
+const NUM_FMT: Format = {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+};
 
 // S&P benchmarks for alpha multipliers (from the original Dashboard.py).
 const SPY_LT = 7.5; // annual %
@@ -41,17 +60,38 @@ export default function Dashboard() {
   }, [positions, cash]);
 
   if (!portfolioId) return <NoPortfolio />;
-  if (isLoading) return <LoadingState label="Loading portfolio…" />;
+  if (isLoading) return <DashboardSkeleton />;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       {/* Big-5 metrics */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <Metric label="Total Value" value={fmtUsd(portValue)} accent="primary" />
-        <Metric label="Gross Exposure" value={fmtUsd(stats?.gross ?? 0)} />
-        <Metric label="Net Liquidity" value={fmtUsd(stats?.netLiq ?? 0)} />
-        <Metric label="HHI (Concentration)" value={fmtNum(stats?.hhi ?? 0)} />
-        <Metric label="Open Trades" value={positions.length} />
+        <Metric
+          label="Total Value"
+          value={fmtUsd(portValue)}
+          animate={portValue}
+          format={USD_FMT}
+          accent="primary"
+        />
+        <Metric
+          label="Gross Exposure"
+          value={fmtUsd(stats?.gross ?? 0)}
+          animate={stats?.gross ?? 0}
+          format={USD_FMT}
+        />
+        <Metric
+          label="Net Liquidity"
+          value={fmtUsd(stats?.netLiq ?? 0)}
+          animate={stats?.netLiq ?? 0}
+          format={USD_FMT}
+        />
+        <Metric
+          label="HHI (Concentration)"
+          value={fmtNum(stats?.hhi ?? 0)}
+          animate={stats?.hhi ?? 0}
+          format={NUM_FMT}
+        />
+        <Metric label="Open Trades" value={positions.length} animate={positions.length} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
@@ -114,17 +154,20 @@ export default function Dashboard() {
 
         {/* Open Trades */}
         <div className="lg:col-span-2">
-          <div className="mb-3 flex items-center justify-between">
-            <SectionTitle>Open Trades</SectionTitle>
-            <AddTradeDialog
-              portfolioId={portfolioId}
-              trigger={
-                <Button variant="ghost" size="sm">
-                  <Plus className="h-4 w-4" /> Add
-                </Button>
-              }
-            />
-          </div>
+          <SectionTitle
+            action={
+              <AddTradeDialog
+                portfolioId={portfolioId}
+                trigger={
+                  <Button variant="ghost" size="sm">
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                }
+              />
+            }
+          >
+            Open Trades
+          </SectionTitle>
           {positions.length === 0 ? (
             <EmptyState
               title="No open trades"

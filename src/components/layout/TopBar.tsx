@@ -8,12 +8,18 @@ import { useTrades } from "@/api/trades";
 import { usePortfolioStore } from "@/store/portfolio";
 import { useRefreshMarketData } from "@/hooks/useRefreshMarketData";
 
+// Must cover every route in App.tsx — an unmapped path silently falls back to
+// "Dashboard", which is how four pages ended up mislabelled.
 const TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/visuals": "Visual Analysis",
   "/strategy": "PM Strategy & Allocation",
   "/history": "Historical Analysis",
   "/analysis": "Trade Analysis Sandbox",
+  "/scanner": "Earnings Premium Scanner",
+  "/income-scanner": "Income Scanner",
+  "/basis": "Basis Tracker",
+  "/iv-surface": "IV Surface",
 };
 
 export function TopBar() {
@@ -26,8 +32,8 @@ export function TopBar() {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold tracking-tight">
+      <div className="flex min-w-0 items-center gap-3">
+        <h1 className="truncate text-lg font-semibold tracking-tight">
           {TITLES[pathname] ?? "Dashboard"}
         </h1>
         {active && <Badge variant="default">{active.name}</Badge>}

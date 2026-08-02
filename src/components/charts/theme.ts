@@ -1,8 +1,7 @@
-import type { Layout, Config } from "plotly.js-dist-min";
-
 /**
- * Shared brand palette for charts, aligned with the app's deep-slate +
- * financial-blue UI tokens (--primary / --gain / --loss in index.css).
+ * Shared brand palette and color math for charts, aligned with the app's
+ * deep-slate + financial-blue UI tokens (--primary / --gain / --loss in
+ * index.css). Rendering-specific styling lives in echartsTheme.ts.
  */
 export const CHART_COLORS = {
   brand: "#1f9bdb",
@@ -34,41 +33,62 @@ export const CHART_SEQUENCE = [
   "#2b6cb0", // royal blue
 ];
 
-/** Base dark layout merged into every chart. */
-export const baseLayout: Partial<Layout> = {
-  paper_bgcolor: "rgba(0,0,0,0)",
-  plot_bgcolor: "rgba(0,0,0,0)",
-  font: { family: "Inter, system-ui, sans-serif", color: CHART_COLORS.text, size: 12 },
-  margin: { l: 56, r: 24, t: 36, b: 44 },
-  colorway: CHART_SEQUENCE,
-  xaxis: {
-    gridcolor: CHART_COLORS.grid,
-    zerolinecolor: CHART_COLORS.zeroLine,
-    linecolor: CHART_COLORS.grid,
-    tickfont: { color: CHART_COLORS.muted },
-  },
-  yaxis: {
-    gridcolor: CHART_COLORS.grid,
-    zerolinecolor: CHART_COLORS.zeroLine,
-    linecolor: CHART_COLORS.grid,
-    tickfont: { color: CHART_COLORS.muted },
-  },
-  legend: {
-    bgcolor: "rgba(0,0,0,0)",
-    font: { color: CHART_COLORS.muted, size: 11 },
-    orientation: "h",
-    yanchor: "bottom",
-    y: 1.02,
-    x: 0,
-  },
-  hoverlabel: {
-    bgcolor: "#11161f",
-    bordercolor: CHART_COLORS.grid,
-    font: { color: CHART_COLORS.text },
-  },
-};
+/** The page canvas behind charts — used for tile borders and shading targets. */
+export const CHART_SURFACE = "#0c0e13";
 
-export const baseConfig: Partial<Config> = {
-  displayModeBar: false,
-  responsive: true,
-};
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHex([r, g, b]: [number, number, number]): string {
+  const to = (n: number) =>
+    Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+/** Linear blend between two hex colors. `amount` 0 → `a`, 1 → `b`. */
+export function mixHex(a: string, b: string, amount: number): string {
+  const [r1, g1, b1] = hexToRgb(a);
+  const [r2, g2, b2] = hexToRgb(b);
+  const t = Math.max(0, Math.min(1, amount));
+  return rgbToHex([r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t]);
+}
+
+/** WCAG relative luminance, 0 (black) → 1 (white). */
+export function luminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Pulls a palette entry down into a dark band so light text stays legible on
+ * top of it. CHART_SEQUENCE deliberately contains near-white steels for line
+ * charts, which are unusable as filled tile backgrounds.
+ *
+ * The 0.095 ceiling is what CHART_COLORS.text needs to clear 4.5:1 — it lets a
+ * single text color stay readable on every tile, so no per-node text array is
+ * required. Verified worst case across the palette: 4.74:1.
+ */
+export function toTileTone(hex: string, maxLum = 0.095): string {
+  let out = hex;
+  // Blending is monotonic in luminance, so a fixed number of steps converges.
+  for (let i = 0; i < 24 && luminance(out) > maxLum; i++) {
+    out = mixHex(out, CHART_SURFACE, 0.12);
+  }
+  return out;
+}

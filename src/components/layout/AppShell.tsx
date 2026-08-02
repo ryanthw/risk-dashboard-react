@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { isSupabaseConfigured } from "@/lib/supabase";
@@ -16,6 +16,7 @@ function ConfigBanner() {
 }
 
 export function AppShell() {
+  const { pathname } = useLocation();
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar />
@@ -23,7 +24,11 @@ export function AppShell() {
         <TopBar />
         <ConfigBanner />
         <main className="flex-1 overflow-y-auto scrollbar-thin p-6">
-          <Outlet />
+          {/* Keying on pathname replays the entry animation per navigation, so
+              a route change reads as a new view rather than a content swap. */}
+          <div key={pathname} className="animate-rise-in">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>
