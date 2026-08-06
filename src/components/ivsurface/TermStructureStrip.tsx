@@ -38,6 +38,17 @@ export function TermStructureStrip({
       );
     });
 
+    // Axis window over every plotted point — ATM line plus both band edges, so
+    // a wide skew can't push the band outside the frame. Rounded outward to a
+    // whole point to keep tick labels clean.
+    const all = [...atm, ...put25, ...call25].filter(Number.isFinite);
+    const domain = all.length
+      ? {
+          min: Math.max(0, Math.floor(Math.min(...all) - 2)),
+          max: Math.ceil(Math.max(...all) + 2),
+        }
+      : {};
+
     // Macro prints inside the surface's date range. The x axis is categorical
     // (one slot per listed expiry), so each event is snapped to the first
     // expiration at or after it — that is the expiry carrying its premium.
@@ -61,7 +72,14 @@ export function TermStructureStrip({
           formatter: (v: string) => v.slice(5),
         },
       },
-      yAxis: valueAxis(undefined, (v: number) => `${v.toFixed(0)}%`),
+      yAxis: {
+        ...valueAxis(undefined, (v: number) => `${v.toFixed(0)}%`),
+        // The skew band is a stacked series, which pins ECharts' auto-scale to a
+        // zero baseline — a 12-14% term structure then renders as a flat line in
+        // the top eighth of a 0-18 axis. Fit the axis to the vol regime instead,
+        // with 2 points of padding so the band and event labels aren't clipped.
+        ...domain,
+      },
       tooltip: {
         trigger: "axis",
         axisPointer: { type: "line" },
