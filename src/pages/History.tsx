@@ -2,16 +2,8 @@ import { useMemo } from "react";
 import { format } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { EChartsOption } from "echarts";
-import { EChart } from "@/components/charts/EChart";
-import { CHART_COLORS, CHART_SURFACE, mixHex } from "@/components/charts/theme";
-import {
-  axisGrid,
-  axisUsd,
-  categoryAxis,
-  tipUsd,
-  valueAxis,
-} from "@/components/charts/echartsTheme";
+import { EquityCurve } from "@/components/charts/EquityCurve";
+import { curveStats } from "@/engine/equityCurve";
 import {
   EmptyState,
   NoPortfolio,
@@ -39,33 +31,7 @@ export default function History() {
   const { data: snapshots, isLoading: loadingSnaps } = useSnapshots(activePortfolioId);
   const { data: closed, isLoading: loadingClosed } = useHistoryTrades(activePortfolioId);
 
-  const netLiqOption = useMemo<EChartsOption | null>(() => {
-    if (!snapshots?.length) return null;
-    return {
-      grid: { ...axisGrid(), left: 8, bottom: 32 },
-      xAxis: { ...categoryAxis(), type: "time" as const, name: undefined },
-      yAxis: valueAxis(undefined, axisUsd),
-      tooltip: {
-        trigger: "axis",
-        axisPointer: { type: "cross" },
-        valueFormatter: (v: unknown) => tipUsd(Number(v)),
-      },
-      series: [
-        {
-          type: "line",
-          name: "Net Liquidity",
-          // Straight segments: these are discrete daily snapshots, and a spline
-          // invents intermediate values that were never observed.
-          smooth: false,
-          symbolSize: 6,
-          data: snapshots.map((s) => [s.ts, s.net_liquidity] as [string, number]),
-          lineStyle: { color: CHART_COLORS.brand, width: 2.5 },
-          itemStyle: { color: CHART_COLORS.brand },
-          areaStyle: { color: mixHex(CHART_COLORS.brand, CHART_SURFACE, 0.78), opacity: 0.6 },
-        },
-      ],
-    };
-  }, [snapshots]);
+  const curve = useMemo(() => curveStats(snapshots ?? []), [snapshots]);
 
   // Stable identity so the sort memo doesn't re-run on every render.
   const closedRows = useMemo(() => closed ?? [], [closed]);
@@ -102,8 +68,12 @@ export default function History() {
         <SectionTitle>Net Liquidity Over Time</SectionTitle>
         <Card>
           <CardContent className="pt-5">
-            {netLiqOption ? (
-              <EChart height={360} option={netLiqOption} />
+            {snapshots && snapshots.length > 0 ? (
+              <EquityCurve
+                snapshots={snapshots}
+                height={360}
+                highWaterMark={curve?.highWaterMark ?? null}
+              />
             ) : (
               <EmptyState
                 title="No snapshots yet"
