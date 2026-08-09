@@ -257,21 +257,14 @@ export default function Dashboard() {
               <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
               {stats.tail ? (
                 <>
-                  <StatRow
-                    label="VaR 95% (at expiry)"
-                    tone="loss"
-                    value={fmtUsd(stats.tail.var95)}
-                  />
-                  <StatRow
-                    label="CVaR 95% (at expiry)"
-                    tone="loss"
-                    value={fmtUsd(stats.tail.cvar95)}
-                  />
+                  <StatRow label="VaR 95%" tone="loss" value={fmtUsd(stats.tail.var95)} />
+                  <StatRow label="CVaR 95%" tone="loss" value={fmtUsd(stats.tail.cvar95)} />
                   {/* The two extremes bracket the real number; showing only the
                       independent one would quietly understate a concentrated book. */}
                   <p className="pt-1 text-xs text-muted-foreground">
-                    Assumes uncorrelated underlyings. Perfectly correlated worst case:{" "}
-                    {fmtUsd(stats.tail.comonotonicVar95)}.
+                    Whole book carried {Math.round(stats.tail.horizonDays)}d to the last
+                    expiry, assuming uncorrelated underlyings. Perfectly correlated worst
+                    case: {fmtUsd(stats.tail.comonotonicVar95)}.
                   </p>
                 </>
               ) : (
