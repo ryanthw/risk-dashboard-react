@@ -216,6 +216,11 @@ export function TradeCard({ position }: { position: Position }) {
                   <span className="tnum font-medium">
                     {stock.direction === "acquire" ? "+" : "−"}
                     {stock.shares} sh @ {fmtUsd(stock.basisPerShare)}
+                    {stock.direction === "dispose" && (
+                      <span className="ml-1 font-normal text-muted-foreground">
+                        (P&amp;L to shares)
+                      </span>
+                    )}
                   </span>
                 </div>
               )}

@@ -312,7 +312,9 @@ export default function Dashboard() {
               </p>
               {record.count === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No closed trades yet. Archive a position to start building a record.
+                  {record.unbooked > 0
+                    ? `${record.unbooked} closed position${record.unbooked === 1 ? "" : "s"} had no cost basis, so no result could be booked.`
+                    : "No closed trades yet. Archive a position to start building a record."}
                 </p>
               ) : (
                 <>
@@ -339,6 +341,13 @@ export default function Dashboard() {
                     <StatRow
                       label="Return on Risk"
                       value={fmtPct(record.returnOnRisk, 1)}
+                    />
+                  )}
+                  {record.unbooked > 0 && (
+                    <StatRow
+                      label="Unbooked (no basis)"
+                      tone="muted"
+                      value={`${record.unbooked} excluded`}
                     />
                   )}
                   {record.count < 20 && (

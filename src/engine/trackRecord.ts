@@ -31,6 +31,12 @@ export interface TrackRecord {
    */
   returnOnRisk: number | null;
   returnOnRiskCount: number;
+  /**
+   * Closed rows whose P&L could not be determined (stock disposed with no
+   * recorded basis). Excluded from every figure above — averaging an unknown
+   * result as zero would quietly pull expectancy toward it.
+   */
+  unbooked: number;
 }
 
 const EMPTY: TrackRecord = {
@@ -46,10 +52,15 @@ const EMPTY: TrackRecord = {
   avgHoldDays: null,
   returnOnRisk: null,
   returnOnRiskCount: 0,
+  unbooked: 0,
 };
 
-export function trackRecord(trades: HistoryTrade[]): TrackRecord {
-  if (trades.length === 0) return EMPTY;
+export function trackRecord(all: HistoryTrade[]): TrackRecord {
+  // A null P&L is an unknown result, not a zero one, so it is held out of every
+  // statistic and reported separately.
+  const unbooked = all.filter((t) => t.realized_pnl == null).length;
+  const trades = all.filter((t) => t.realized_pnl != null);
+  if (trades.length === 0) return { ...EMPTY, unbooked };
 
   let grossWin = 0;
   let grossLoss = 0;
@@ -62,7 +73,7 @@ export function trackRecord(trades: HistoryTrade[]): TrackRecord {
   let riskCount = 0;
 
   for (const t of trades) {
-    const pnl = t.realized_pnl ?? 0;
+    const pnl = t.realized_pnl as number;
     // Scratches (exactly zero) count as neither a win nor a loss, so they drag
     // expectancy without inflating either side of the payoff ratio.
     if (pnl > 0) {
@@ -103,6 +114,7 @@ export function trackRecord(trades: HistoryTrade[]): TrackRecord {
     avgHoldDays: holdCount > 0 ? holdSum / holdCount : null,
     returnOnRisk: riskSum > 0 ? (riskPnl / riskSum) * 100 : null,
     returnOnRiskCount: riskCount,
+    unbooked,
   };
 }
 
