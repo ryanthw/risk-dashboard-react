@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Format } from "@number-flow/react";
-import { Plus } from "lucide-react";
+import { AlertTriangle, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Metric, StatRow } from "@/components/ui/metric";
 import {
@@ -10,11 +11,16 @@ import {
   NoPortfolio,
   SectionTitle,
 } from "@/components/ui/states";
+import { EquityCurve } from "@/components/charts/EquityCurve";
 import { TradeCard } from "@/components/trades/TradeCard";
 import { AddTradeDialog } from "@/components/trades/AddTradeDialog";
 import { useActivePortfolio } from "@/hooks/useActivePortfolio";
+import { useSnapshots, useHistoryTrades } from "@/api/history";
 import { fmtUsd, fmtNum, fmtPct, fmtMultiple } from "@/lib/format";
 import * as P from "@/engine/portfolio";
+import * as R from "@/engine/portfolioRisk";
+import { trackRecord } from "@/engine/trackRecord";
+import { curveStats, selfPercentile } from "@/engine/equityCurve";
 
 // Kept in sync with fmtUsd/fmtNum in lib/format so the animated readout and the
 // static fallback render identically.
@@ -29,20 +35,21 @@ const NUM_FMT: Format = {
   maximumFractionDigits: 2,
 };
 
-// S&P benchmarks for alpha multipliers (from the original Dashboard.py).
-const SPY_LT = 7.5; // annual %
-const SPY_ST = ((1 + 0.075) ** (1 / 26) - 1) * 100; // ~bi-weekly %
+/** Positions expiring inside this window are surfaced as needing attention. */
+const EXPIRY_WARN_DAYS = 7;
 
 export default function Dashboard() {
   const { portfolioId, positions, cash, portValue, isLoading } = useActivePortfolio();
+  const { data: snapshots } = useSnapshots(portfolioId);
+  const { data: closedTrades } = useHistoryTrades(portfolioId);
+  const [tickerFilter, setTickerFilter] = useState<string | null>(null);
 
   const stats = useMemo(() => {
     if (positions.length === 0) return null;
-    const erAnn = P.erAnn(positions, cash) * 100;
-    const erPct = P.erPercent(positions, cash);
+    const netLiq = P.netLiquidity(positions, cash);
     return {
       gross: P.grossExposure(positions),
-      netLiq: P.netLiquidity(positions, cash),
+      netLiq,
       hhi: P.hhi(positions),
       pctExposure: P.percentExposure(positions, cash),
       leverage: P.leverageRatio(positions, cash),
@@ -52,19 +59,43 @@ export default function Dashboard() {
       maxProfit: P.maxProfit(positions),
       riskReward: P.riskRewardRatio(positions),
       cashPct: P.cashPercent(positions, cash),
-      erAnn,
-      erPct,
-      ltAlpha: erAnn / SPY_LT,
-      stAlpha: erPct / SPY_ST,
+      undeployed: P.undeployedCash(positions, cash),
+      betaDelta: P.betaWeightedDelta(positions),
+      erAnn: P.erAnn(positions, cash) * 100,
+      erPct: P.erPercent(positions, cash),
+      greeks: R.portfolioGreeks(positions),
+      tail: R.expiryTailRisk(positions),
+      assignments: R.assignmentRisks(positions),
+      expiring: R.expiringWithin(positions, EXPIRY_WARN_DAYS),
+      nearestDte: R.nearestDte(positions),
+      largest: R.largestTickerRisk(positions, portValue),
+      undefinedRisk: R.undefinedRiskCount(positions),
     };
-  }, [positions, cash]);
+  }, [positions, cash, portValue]);
+
+  const curve = useMemo(() => curveStats(snapshots ?? []), [snapshots]);
+  const erpaRank = useMemo(() => selfPercentile(snapshots ?? [], "erpa"), [snapshots]);
+  const record = useMemo(() => trackRecord(closedTrades ?? []), [closedTrades]);
+
+  const tickers = useMemo(
+    () => [...new Set(positions.map((p) => p.trade.ticker))].sort(),
+    [positions],
+  );
+  const visiblePositions = useMemo(
+    () => (tickerFilter ? positions.filter((p) => p.trade.ticker === tickerFilter) : positions),
+    [positions, tickerFilter],
+  );
 
   if (!portfolioId) return <NoPortfolio />;
   if (isLoading) return <DashboardSkeleton />;
 
+  // theta is a credit for short premium, so a positive value is the good case.
+  const theta = stats?.greeks.theta ?? 0;
+  const attention = (stats?.assignments.length ?? 0) + (stats?.expiring.length ?? 0);
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      {/* Big-5 metrics */}
+      {/* Headline row — the numbers needed to operate, unchanged in spirit. */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Metric
           label="Total Value"
@@ -72,12 +103,20 @@ export default function Dashboard() {
           animate={portValue}
           format={USD_FMT}
           accent="primary"
+          delta={
+            curve?.changeVsPrior != null
+              ? `${curve.changeVsPrior >= 0 ? "+" : ""}${fmtUsd(curve.changeVsPrior)}`
+              : undefined
+          }
+          deltaPositive={(curve?.changeVsPrior ?? 0) >= 0}
+          hint={curve?.changeVsPrior != null ? "vs last snapshot" : undefined}
         />
         <Metric
           label="Gross Exposure"
           value={fmtUsd(stats?.gross ?? 0)}
           animate={stats?.gross ?? 0}
           format={USD_FMT}
+          hint={stats?.undefinedRisk ? `${stats.undefinedRisk} undefined-risk` : undefined}
         />
         <Metric
           label="Net Liquidity"
@@ -90,97 +129,275 @@ export default function Dashboard() {
           value={fmtNum(stats?.hhi ?? 0)}
           animate={stats?.hhi ?? 0}
           format={NUM_FMT}
+          hint={stats?.largest ? `${stats.largest.ticker} largest` : undefined}
         />
-        <Metric label="Open Trades" value={positions.length} animate={positions.length} />
+        <Metric
+          label="Open Trades"
+          value={positions.length}
+          animate={positions.length}
+          hint={stats?.nearestDte != null ? `${Math.floor(stats.nearestDte)}d to nearest` : undefined}
+        />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        {/* Risk Analysis */}
-        <div className="lg:col-span-3">
-          <SectionTitle>Risk Analysis</SectionTitle>
-          {stats ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Card>
-                <CardContent className="space-y-2 pt-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Exposure & Leverage
-                  </p>
-                  <StatRow label="Percent Exposure" value={fmtPct(stats.pctExposure)} />
-                  <StatRow label="Leverage Ratio" value={fmtMultiple(stats.leverage)} />
-                  <StatRow label="Cash / Position" value={fmtNum(stats.cashToPos)} />
-                  <StatRow label="Highest Position" value={fmtPct(stats.highestPos)} />
-                  <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Performance Multipliers
-                  </p>
-                  <StatRow
-                    label="LT Alpha (vs SPY)"
-                    value={fmtMultiple(stats.ltAlpha)}
-                    tone="gain"
-                  />
-                  <StatRow
-                    label="ST Alpha (vs SPY)"
-                    value={fmtMultiple(stats.stAlpha)}
-                    tone="gain"
-                  />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="space-y-2 pt-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Returns & Profitability
-                  </p>
-                  <StatRow label="Expected Returns" value={fmtUsd(stats.expReturns)} />
-                  <StatRow label="ERP (% of value)" value={fmtPct(stats.erPct)} />
-                  <StatRow label="ERPA (annualized)" value={fmtPct(stats.erAnn)} />
-                  <StatRow label="Max Gain" value={fmtUsd(stats.maxProfit)} />
-                  <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Efficiency
-                  </p>
-                  <StatRow label="Risk / Reward" value={fmtNum(stats.riskReward)} />
-                  <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
-                </CardContent>
-              </Card>
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="pt-5">
-                <p className="text-sm text-muted-foreground">
-                  Add positions to compute risk analytics.
+      {/* Equity curve, full width. */}
+      <div>
+        <SectionTitle
+          action={
+            curve ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant={curve.changeVsFirst >= 0 ? "gain" : "loss"}>
+                  {curve.changeVsFirst >= 0 ? "+" : ""}
+                  {fmtUsd(curve.changeVsFirst)} since first snapshot
+                </Badge>
+                <Badge variant="muted">{fmtPct(curve.currentDrawdown, 1)} off high</Badge>
+                <Badge variant="muted">{curve.count} snapshots</Badge>
+              </div>
+            ) : null
+          }
+        >
+          Net Liquidity
+        </SectionTitle>
+        <Card>
+          <CardContent className="pt-5">
+            {snapshots && snapshots.length > 0 ? (
+              <>
+                <EquityCurve
+                  snapshots={snapshots}
+                  height={340}
+                  highWaterMark={curve?.highWaterMark ?? null}
+                />
+                {/* Deposits are not yet tracked, so this line is a balance, not
+                    a return. Saying so beats letting the shape imply performance. */}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Balance including any deposits — not a return series. Sampled on manual
+                  refresh
+                  {curve?.medianGapDays != null
+                    ? `, median ${fmtNum(curve.medianGapDays, 1)}d apart`
+                    : ""}
+                  .
                 </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Open Trades */}
-        <div className="lg:col-span-2">
-          <SectionTitle
-            action={
-              <AddTradeDialog
-                portfolioId={portfolioId}
-                trigger={
-                  <Button variant="ghost" size="sm">
-                    <Plus className="h-4 w-4" /> Add
-                  </Button>
-                }
+              </>
+            ) : (
+              <EmptyState
+                title="No snapshots yet"
+                hint="Use Refresh on the top bar to log a daily portfolio snapshot."
               />
-            }
-          >
-            Open Trades
-          </SectionTitle>
-          {positions.length === 0 ? (
-            <EmptyState
-              title="No open trades"
-              hint="Add your first position to begin tracking risk."
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Needs attention — only rendered when there is something to act on. */}
+      {attention > 0 && stats && (
+        <div>
+          <SectionTitle>Needs Attention</SectionTitle>
+          <Card className="border-loss/30">
+            <CardContent className="space-y-2 pt-5">
+              {stats.assignments.map((a) => (
+                <StatRow
+                  key={`itm-${a.position.trade.id}`}
+                  tone="loss"
+                  label={`${a.position.trade.ticker} short ${a.kind} ${fmtUsd(a.strike)} is ITM`}
+                  value={`${fmtPct(a.itmPct, 1)} in`}
+                />
+              ))}
+              {stats.expiring.map((p) => (
+                <StatRow
+                  key={`exp-${p.trade.id}`}
+                  tone="muted"
+                  label={`${p.trade.ticker} expires in ${Math.floor(p.metrics.dte)}d`}
+                  value={fmtUsd(p.metrics.value)}
+                />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Stat tiles. */}
+      {stats ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Card>
+            <CardContent className="space-y-2 pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Greeks & Income
+              </p>
+              <StatRow
+                label="Theta / day"
+                value={fmtUsd(theta)}
+                tone={theta >= 0 ? "gain" : "loss"}
+              />
+              <StatRow
+                label="Theta % of net liq"
+                value={fmtPct(stats.netLiq > 0 ? (theta / stats.netLiq) * 100 : 0, 2)}
+              />
+              <StatRow label="Vega (per vol pt)" value={fmtUsd(stats.greeks.vega)} />
+              <StatRow label="Beta-weighted delta" value={fmtNum(stats.betaDelta, 0)} />
+              <StatRow label="Expected Returns" value={fmtUsd(stats.expReturns)} />
+              <StatRow label="ERPA (annualized)" value={fmtPct(stats.erAnn)} />
+              {erpaRank && (
+                <StatRow
+                  label="ERPA vs own history"
+                  tone="muted"
+                  value={`${fmtPct(erpaRank.percentile, 0)} pctile · n=${erpaRank.n}`}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-2 pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Risk & Exposure
+              </p>
+              <StatRow label="Percent Exposure" value={fmtPct(stats.pctExposure)} />
+              <StatRow label="Leverage Ratio" value={fmtMultiple(stats.leverage)} />
+              <StatRow label="Highest Position" value={fmtPct(stats.highestPos)} />
+              <StatRow label="Undeployed Cash" value={fmtUsd(stats.undeployed)} />
+              <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
+              {stats.tail ? (
+                <>
+                  <StatRow
+                    label="VaR 95% (at expiry)"
+                    tone="loss"
+                    value={fmtUsd(stats.tail.var95)}
+                  />
+                  <StatRow
+                    label="CVaR 95% (at expiry)"
+                    tone="loss"
+                    value={fmtUsd(stats.tail.cvar95)}
+                  />
+                  {/* The two extremes bracket the real number; showing only the
+                      independent one would quietly understate a concentrated book. */}
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    Assumes uncorrelated underlyings. Perfectly correlated worst case:{" "}
+                    {fmtUsd(stats.tail.comonotonicVar95)}.
+                  </p>
+                </>
+              ) : (
+                <StatRow label="VaR 95%" tone="muted" value="No option legs" />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-2 pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Realized Track Record
+              </p>
+              {record.count === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No closed trades yet. Archive a position to start building a record.
+                </p>
+              ) : (
+                <>
+                  <StatRow
+                    label="Total Realized"
+                    tone={record.totalRealized >= 0 ? "gain" : "loss"}
+                    value={fmtUsd(record.totalRealized)}
+                  />
+                  <StatRow
+                    label="Win Rate"
+                    value={`${fmtPct(record.winRate, 0)} (${record.wins}/${record.count})`}
+                  />
+                  <StatRow
+                    label="Profit Factor"
+                    value={record.profitFactor == null ? "No losses yet" : fmtNum(record.profitFactor)}
+                  />
+                  <StatRow label="Expectancy / trade" value={fmtUsd(record.expectancy)} />
+                  <StatRow label="Avg Win" value={fmtUsd(record.avgWin)} />
+                  <StatRow label="Avg Loss" value={fmtUsd(-record.avgLoss)} />
+                  {record.avgHoldDays != null && (
+                    <StatRow label="Avg Hold" value={`${fmtNum(record.avgHoldDays, 1)}d`} />
+                  )}
+                  {record.returnOnRisk != null && (
+                    <StatRow
+                      label="Return on Risk"
+                      value={fmtPct(record.returnOnRisk, 1)}
+                    />
+                  )}
+                  {record.count < 20 && (
+                    <p className="flex items-start gap-1.5 pt-1 text-xs text-muted-foreground">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                      Only {record.count} closed trade{record.count === 1 ? "" : "s"} — too few
+                      to read as edge.
+                    </p>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-sm text-muted-foreground">
+              Add positions to compute risk analytics.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Open trades, filterable by ticker. */}
+      <div>
+        <SectionTitle
+          action={
+            <AddTradeDialog
+              portfolioId={portfolioId}
+              trigger={
+                <Button variant="ghost" size="sm">
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+              }
             />
-          ) : (
-            <div className="max-h-[640px] space-y-3 overflow-y-auto scrollbar-thin pr-1">
-              {positions.map((pos) => (
+          }
+        >
+          Open Trades
+        </SectionTitle>
+        {positions.length === 0 ? (
+          <EmptyState
+            title="No open trades"
+            hint="Add your first position to begin tracking risk."
+          />
+        ) : (
+          <>
+            {tickers.length > 1 && (
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                {tickers.map((tk) => {
+                  const active = tickerFilter === tk;
+                  return (
+                    <button
+                      key={tk}
+                      type="button"
+                      onClick={() => setTickerFilter(active ? null : tk)}
+                      className={
+                        active
+                          ? "rounded-full border border-primary/40 bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary"
+                          : "rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+                      }
+                    >
+                      {tk}
+                    </button>
+                  );
+                })}
+                {tickerFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setTickerFilter(null)}
+                    className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" /> Clear
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {visiblePositions.map((pos) => (
                 <TradeCard key={pos.trade.id} position={pos} />
               ))}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
