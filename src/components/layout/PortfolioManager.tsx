@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { Trash2, Plus, Wallet } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Trash2,
+  Plus,
+  Wallet,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +24,7 @@ import {
   useDeletePortfolio,
   useUpdateCash,
 } from "@/api/portfolios";
+import { useRecordCashFlow } from "@/api/cashFlows";
 import { usePortfolioStore } from "@/store/portfolio";
 import { fmtUsd } from "@/lib/format";
 
@@ -33,10 +40,12 @@ export function PortfolioManager({
   const createMut = useCreatePortfolio();
   const deleteMut = useDeletePortfolio();
   const cashMut = useUpdateCash();
+  const flowMut = useRecordCashFlow();
 
   const [newName, setNewName] = useState("");
   const active = portfolios?.find((p) => p.id === activePortfolioId);
   const [cash, setCash] = useState<string>("");
+  const [transfer, setTransfer] = useState<string>("");
 
   const handleCreate = async () => {
     const name = newName.trim();
@@ -70,11 +79,36 @@ export function PortfolioManager({
     const val = Number(cash);
     if (!Number.isFinite(val)) return;
     try {
-      await cashMut.mutateAsync({ id: active.id, cash: val });
-      toast.success("Cash updated");
+      await cashMut.mutateAsync({ id: active.id, cash: val, currentCash: active.cash });
+      toast.success("Cash corrected", "Booked as an adjustment");
       setCash("");
     } catch (e) {
       toast.error("Update failed", String((e as Error).message));
+    }
+  };
+
+  /**
+   * Deposits and withdrawals are the flows that change the capital base, so
+   * they must be recorded as such — booking a transfer as an adjustment would
+   * let it count as trading performance in TWR.
+   */
+  const handleTransfer = async (direction: "deposit" | "withdrawal") => {
+    if (!active) return;
+    const magnitude = Math.abs(Number(transfer));
+    if (!Number.isFinite(magnitude) || magnitude === 0) return;
+    try {
+      await flowMut.mutateAsync({
+        portfolio_id: active.id,
+        amount: direction === "deposit" ? magnitude : -magnitude,
+        kind: direction,
+      });
+      toast.success(
+        direction === "deposit" ? "Deposit recorded" : "Withdrawal recorded",
+        fmtUsd(magnitude),
+      );
+      setTransfer("");
+    } catch (e) {
+      toast.error("Could not record transfer", String((e as Error).message));
     }
   };
 
@@ -125,18 +159,63 @@ export function PortfolioManager({
                   <span className="font-semibold tnum">{fmtUsd(active.cash)}</span>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="cash">New cash balance</Label>
+                  <Label htmlFor="transfer">Deposit or withdrawal</Label>
                   <Input
-                    id="cash"
+                    id="transfer"
                     type="number"
-                    value={cash}
-                    onChange={(e) => setCash(e.target.value)}
-                    placeholder={String(active.cash)}
+                    min="0"
+                    value={transfer}
+                    onChange={(e) => setTransfer(e.target.value)}
+                    placeholder="0.00"
                   />
+                  <p className="text-[0.7rem] text-muted-foreground">
+                    Money moving in or out of the account. Kept separate from trading
+                    results so returns aren&apos;t inflated by contributions.
+                  </p>
                 </div>
-                <Button onClick={handleCash} disabled={cashMut.isPending} className="w-full">
-                  <Wallet className="h-4 w-4" /> Update Balance
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => handleTransfer("deposit")}
+                    disabled={flowMut.isPending}
+                    className="flex-1"
+                  >
+                    <ArrowDownToLine className="h-4 w-4" /> Deposit
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleTransfer("withdrawal")}
+                    disabled={flowMut.isPending}
+                    className="flex-1"
+                  >
+                    <ArrowUpFromLine className="h-4 w-4" /> Withdraw
+                  </Button>
+                </div>
+
+                <div className="border-t border-border pt-3">
+                  <Label htmlFor="cash" className="text-muted-foreground">
+                    Correct balance to
+                  </Label>
+                  <div className="mt-1.5 flex gap-2">
+                    <Input
+                      id="cash"
+                      type="number"
+                      value={cash}
+                      onChange={(e) => setCash(e.target.value)}
+                      placeholder={String(active.cash)}
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleCash}
+                      disabled={cashMut.isPending}
+                    >
+                      <Wallet className="h-4 w-4" /> Set
+                    </Button>
+                  </div>
+                  <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+                    For reconciling against your broker. Books the difference as an
+                    adjustment, not a transfer.
+                  </p>
+                </div>
               </>
             ) : (
               <p className="py-4 text-center text-sm text-muted-foreground">

@@ -13,31 +13,53 @@ import { useDeleteTrade } from "@/api/trades";
 import { fmtUsd, fmtPct, pnlClass } from "@/lib/format";
 import { TRADE_TYPE_LABELS } from "@/types";
 import type { Position } from "@/engine/portfolio";
+import {
+  EXIT_PATH_LABELS,
+  availableExitPaths,
+  closeIsDebit,
+  closingCashFlow,
+  realizedPnl,
+  sharesDelta,
+  type ExitInput,
+  type ExitPath,
+} from "@/engine/cashFlow";
 
 export function TradeCard({ position }: { position: Position }) {
   const { trade, metrics } = position;
   const [editOpen, setEditOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
+  const [path, setPath] = useState<ExitPath>("close");
   // Kept as a raw string so the field can be emptied — parsing on every
   // keystroke turns "" into 0 and makes the placeholder zero undeletable.
-  const [realized, setRealized] = useState(String(metrics.expectedProfit));
+  const [amount, setAmount] = useState("");
 
-  const realizedNum = Number(realized);
-  const realizedValid = realized.trim() !== "" && Number.isFinite(realizedNum);
+  const paths = availableExitPaths(trade.trade_type);
+  const isDebitClose = closeIsDebit(trade.trade_type);
+  const amountNum = Number(amount);
+  // Only a plain close needs a number: expiry moves nothing and assignment
+  // /call-away are both priced off the strike.
+  const needsAmount = path === "close";
+  const amountValid =
+    !needsAmount || (amount.trim() !== "" && Number.isFinite(amountNum) && amountNum >= 0);
+
+  const exit: ExitInput = { path, amount: amountValid && needsAmount ? amountNum : 0 };
+  const derivedPnl = amountValid ? realizedPnl(trade, exit) : null;
+  const cashMove = amountValid ? closingCashFlow(trade, exit) : null;
+  const stock = sharesDelta(trade, path);
 
   const archive = useArchiveTrade();
   const del = useDeleteTrade();
 
   const handleArchive = async () => {
-    if (!realizedValid) return;
+    if (!amountValid) return;
     try {
-      await archive.mutateAsync({
+      const res = await archive.mutateAsync({
         trade,
-        realizedPnl: realizedNum,
+        exit,
         maxLoss: metrics.maxLoss,
         value: metrics.value,
       });
-      toast.success(`Archived ${trade.ticker}`, `${fmtUsd(realizedNum)} realized`);
+      toast.success(`Archived ${trade.ticker}`, `${fmtUsd(res.pnl)} realized`);
       setCloseOpen(false);
     } catch (e) {
       toast.error("Archive failed", String((e as Error).message));
@@ -113,7 +135,10 @@ export function TradeCard({ position }: { position: Position }) {
         <Popover
           open={closeOpen}
           onOpenChange={(open) => {
-            if (open) setRealized(String(metrics.expectedProfit));
+            if (open) {
+              setPath("close");
+              setAmount("");
+            }
             setCloseOpen(open);
           }}
         >
@@ -122,29 +147,86 @@ export function TradeCard({ position }: { position: Position }) {
               <X className="h-3.5 w-3.5" /> Close
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-72">
+          <PopoverContent align="end" className="w-80">
             <p className="text-sm font-semibold">Close {trade.ticker}</p>
-            <div className="mt-3 space-y-1.5">
-              <Label>Final realized P&L</Label>
-              <Input
-                type="number"
-                step="any"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={realized}
-                onChange={(e) => setRealized(e.target.value)}
-                aria-invalid={!realizedValid}
-              />
-              {!realizedValid && (
-                <p className="text-[0.7rem] text-loss">Enter a realized P&L to archive.</p>
+
+            {paths.length > 1 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {paths.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPath(p)}
+                    className={
+                      path === p
+                        ? "rounded-md border border-primary/40 bg-primary/15 px-2 py-1 text-xs font-medium text-primary"
+                        : "rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                    }
+                  >
+                    {EXIT_PATH_LABELS[p]}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {needsAmount && (
+              <div className="mt-3 space-y-1.5">
+                <Label>{isDebitClose ? "Cost to close (debit)" : "Proceeds (credit)"}</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  aria-invalid={!amountValid}
+                />
+                <p className="text-[0.7rem] text-muted-foreground">
+                  What actually changed hands, as a positive number. P&amp;L is derived.
+                </p>
+                {!amountValid && (
+                  <p className="text-[0.7rem] text-loss">Enter the closing amount.</p>
+                )}
+              </div>
+            )}
+
+            {/* Show the two consequences before committing: what the balance
+                does, and what gets booked as the result. */}
+            <div className="mt-3 space-y-1 rounded-md border border-border bg-secondary/40 px-2.5 py-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Cash</span>
+                <span className="tnum font-medium">
+                  {cashMove == null
+                    ? "—"
+                    : cashMove === 0
+                      ? "No movement"
+                      : `${cashMove > 0 ? "+" : ""}${fmtUsd(cashMove)}`}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Realized P&amp;L</span>
+                <span className={`tnum font-semibold ${derivedPnl == null ? "" : pnlClass(derivedPnl)}`}>
+                  {derivedPnl == null ? "—" : fmtUsd(derivedPnl)}
+                </span>
+              </div>
+              {stock && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Stock</span>
+                  <span className="tnum font-medium">
+                    {stock.direction === "acquire" ? "+" : "−"}
+                    {stock.shares} sh @ {fmtUsd(stock.basisPerShare)}
+                  </span>
+                </div>
               )}
             </div>
+
             <Button
               variant="success"
               size="sm"
               className="mt-3 w-full"
               onClick={handleArchive}
-              disabled={archive.isPending || !realizedValid}
+              disabled={archive.isPending || !amountValid}
             >
               Archive to History
             </Button>

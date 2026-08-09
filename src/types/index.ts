@@ -120,6 +120,38 @@ export interface Snapshot {
   erpa: number;
 }
 
+/**
+ * Ledger row kinds. The first three change the capital base (external); the
+ * rest are the portfolio earning or losing its own money. See
+ * `engine/cashFlow.isExternal` — the split is what makes TWR meaningful.
+ */
+export type CashFlowKind =
+  | "opening_balance"
+  | "deposit"
+  | "withdrawal"
+  | "trade_open"
+  | "trade_close"
+  | "assignment"
+  | "called_away"
+  | "expiry"
+  | "dividend"
+  | "fee"
+  | "adjustment";
+
+export interface CashFlow {
+  id: string;
+  user_id: string;
+  portfolio_id: string;
+  ts: string;
+  /** Signed: positive moves cash into the account. */
+  amount: number;
+  kind: CashFlowKind;
+  trade_id: string | null;
+  ticker: string | null;
+  note: string | null;
+  created_at: string;
+}
+
 /** Live market data for a ticker, fetched via the edge function. */
 export interface MarketQuote {
   ticker: string;

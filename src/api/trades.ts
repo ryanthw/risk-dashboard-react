@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/store/auth";
+import { invalidateCash, recordCashFlow } from "./cashFlows";
+import { openingCashFlow } from "@/engine/cashFlow";
 import type { Trade, TradeInput } from "@/types";
 
 const KEY = "trades";
@@ -47,15 +49,37 @@ export function useUpsertTrade() {
         sector: input.sector ?? "Unknown",
         beta: input.beta ?? 1.0,
       };
+      const isCreate = !input.id;
       const { data, error } = await supabase
         .from("trades")
         .upsert(payload)
         .select()
         .single();
       if (error) throw error;
-      return mapTrade(data);
+      const trade = mapTrade(data);
+
+      // Opening a position moves cash: a credit structure pays you the premium,
+      // a debit one costs it, shares cost their basis. Only on create — edits
+      // go through useUpdateTrade, and re-booking here would double-count.
+      if (isCreate) {
+        const amount = openingCashFlow(trade);
+        if (amount !== 0) {
+          await recordCashFlow({
+            portfolio_id: trade.portfolio_id,
+            amount,
+            kind: "trade_open",
+            trade_id: trade.id,
+            ticker: trade.ticker,
+            note: `Opened ${trade.trade_type} ${trade.ticker}`,
+          });
+        }
+      }
+      return trade;
     },
-    onSuccess: (t) => qc.invalidateQueries({ queryKey: [KEY, t.portfolio_id] }),
+    onSuccess: (t, vars) => {
+      qc.invalidateQueries({ queryKey: [KEY, t.portfolio_id] });
+      if (!vars.id) invalidateCash(qc, t.portfolio_id);
+    },
   });
 }
 
