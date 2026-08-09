@@ -16,11 +16,13 @@ import { TradeCard } from "@/components/trades/TradeCard";
 import { AddTradeDialog } from "@/components/trades/AddTradeDialog";
 import { useActivePortfolio } from "@/hooks/useActivePortfolio";
 import { useSnapshots, useHistoryTrades } from "@/api/history";
+import { useCashFlows } from "@/api/cashFlows";
 import { fmtUsd, fmtNum, fmtPct, fmtMultiple } from "@/lib/format";
 import * as P from "@/engine/portfolio";
 import * as R from "@/engine/portfolioRisk";
 import { trackRecord } from "@/engine/trackRecord";
 import { curveStats, selfPercentile } from "@/engine/equityCurve";
+import { computeTwr } from "@/engine/twr";
 
 // Kept in sync with fmtUsd/fmtNum in lib/format so the animated readout and the
 // static fallback render identically.
@@ -42,6 +44,10 @@ export default function Dashboard() {
   const { portfolioId, positions, cash, portValue, isLoading } = useActivePortfolio();
   const { data: snapshots } = useSnapshots(portfolioId);
   const { data: closedTrades } = useHistoryTrades(portfolioId);
+  // isSuccess, not just data: if the ledger query fails the fallback would be
+  // an empty flow list, which silently turns TWR back into the naive balance
+  // return while still labelling it TWR.
+  const { data: cashFlows, isSuccess: ledgerReady } = useCashFlows(portfolioId);
   const [tickerFilter, setTickerFilter] = useState<string | null>(null);
 
   const stats = useMemo(() => {
@@ -74,6 +80,10 @@ export default function Dashboard() {
   }, [positions, cash, portValue]);
 
   const curve = useMemo(() => curveStats(snapshots ?? []), [snapshots]);
+  const twr = useMemo(
+    () => (ledgerReady ? computeTwr(snapshots ?? [], cashFlows ?? []) : null),
+    [snapshots, cashFlows, ledgerReady],
+  );
   const erpaRank = useMemo(() => selfPercentile(snapshots ?? [], "erpa"), [snapshots]);
   const record = useMemo(() => trackRecord(closedTrades ?? []), [closedTrades]);
 
@@ -145,11 +155,26 @@ export default function Dashboard() {
           action={
             curve ? (
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge variant={curve.changeVsFirst >= 0 ? "gain" : "loss"}>
-                  {curve.changeVsFirst >= 0 ? "+" : ""}
-                  {fmtUsd(curve.changeVsFirst)} since first snapshot
-                </Badge>
-                <Badge variant="muted">{fmtPct(curve.currentDrawdown, 1)} off high</Badge>
+                {twr ? (
+                  <>
+                    <Badge variant={twr.totalReturn >= 0 ? "gain" : "loss"}>
+                      {twr.totalReturn >= 0 ? "+" : ""}
+                      {fmtPct(twr.totalReturn * 100, 2)} TWR
+                    </Badge>
+                    <Badge variant={twr.tradingPnl >= 0 ? "gain" : "loss"}>
+                      {twr.tradingPnl >= 0 ? "+" : ""}
+                      {fmtUsd(twr.tradingPnl)} trading
+                    </Badge>
+                    <Badge variant="muted">
+                      {fmtPct(twr.currentDrawdown, 1)} off high
+                    </Badge>
+                  </>
+                ) : (
+                  <Badge variant={curve.changeVsFirst >= 0 ? "gain" : "loss"}>
+                    {curve.changeVsFirst >= 0 ? "+" : ""}
+                    {fmtUsd(curve.changeVsFirst)} balance change
+                  </Badge>
+                )}
                 <Badge variant="muted">{curve.count} snapshots</Badge>
               </div>
             ) : null
@@ -166,15 +191,22 @@ export default function Dashboard() {
                   height={340}
                   highWaterMark={curve?.highWaterMark ?? null}
                 />
-                {/* Deposits are not yet tracked, so this line is a balance, not
-                    a return. Saying so beats letting the shape imply performance. */}
+                {/* The line is still a balance; TWR is what strips the deposits
+                    out of it. Keep the distinction explicit on the page. */}
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Balance including any deposits — not a return series. Sampled on manual
-                  refresh
-                  {curve?.medianGapDays != null
-                    ? `, median ${fmtNum(curve.medianGapDays, 1)}d apart`
+                  Line shows balance
+                  {twr && twr.netContributions !== 0
+                    ? `, including ${fmtUsd(twr.netContributions)} net contributions`
                     : ""}
-                  .
+                  ; TWR above removes contributions.
+                  {twr?.annualized != null
+                    ? ` ${fmtPct(twr.annualized * 100, 1)} annualized over ${twr.spanDays}d.`
+                    : twr
+                      ? ` Too short a span (${twr.spanDays}d) to annualize.`
+                      : ""}
+                  {curve?.medianGapDays != null
+                    ? ` Sampled on refresh, median ${fmtNum(curve.medianGapDays, 1)}d apart.`
+                    : ""}
                 </p>
               </>
             ) : (
