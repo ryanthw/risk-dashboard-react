@@ -230,23 +230,32 @@ export default function Visuals() {
   }, [positions, uniqueTickers]);
 
   const allocationOption = useMemo<EChartsOption>(() => {
-    const values = positions.map((p) => Math.abs(p.metrics.maxLoss));
-    const total = values.reduce((a, b) => a + b, 0);
+    // One wedge per ticker, not per trade: a name held across several trades is
+    // a single concentration of risk and should read that way.
+    const byTicker = new Map<string, number>();
+    for (const p of positions) {
+      const tk = p.trade.ticker;
+      byTicker.set(tk, (byTicker.get(tk) ?? 0) + Math.abs(p.metrics.maxLoss));
+    }
+    const total = [...byTicker.values()].reduce((a, b) => a + b, 0);
     // Label visibility is decided per slice rather than by hiding overlapping
     // labels after layout: `labelLayout.hideOverlap` drops the text but leaves
     // the leader line behind, which reads as a rendering glitch. Turning both
     // off together on thin slices keeps the ring clean.
-    const pieSlices = positions.map((p, i) => {
-      const value = values[i];
-      const show = total > 0 && (value / total) * 100 >= 5;
-      return {
-        name: p.trade.ticker,
-        value,
-        itemStyle: { color: CHART_SEQUENCE[i % CHART_SEQUENCE.length] },
-        label: { show },
-        labelLine: { show },
-      };
-    });
+    const pieSlices = [...byTicker.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([ticker, value]) => {
+        const show = total > 0 && (value / total) * 100 >= 5;
+        return {
+          name: ticker,
+          value,
+          // Same ticker→color mapping as the expiration bars so the two charts
+          // in the row read together.
+          itemStyle: { color: tickerColor(ticker, uniqueTickers) },
+          label: { show },
+          labelLine: { show },
+        };
+      });
     return {
       grid: { left: 0, right: 0, top: 0, bottom: 0 },
       // No legend: with a long tail of sub-1% tickers it wrapped over the ring.
@@ -280,7 +289,7 @@ export default function Visuals() {
         },
       ],
     };
-  }, [positions]);
+  }, [positions, uniqueTickers]);
 
   const pnlDistOption = useMemo<EChartsOption>(() => {
     if (!agg) return {};
