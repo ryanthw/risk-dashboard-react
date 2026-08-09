@@ -102,7 +102,9 @@ export interface HistoryTrade {
   trade_type: TradeType;
   entry_date: string | null;
   exit_date: string | null;
-  realized_pnl: number;
+  /** Null when the result is genuinely unknown — e.g. stock sold with no
+   *  recorded cost basis. Not the same as zero. */
+  realized_pnl: number | null;
   iv_at_close: number;
   max_loss: number;
   final_value: number;

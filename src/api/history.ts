@@ -103,13 +103,24 @@ export function useArchiveTrade() {
   });
 }
 
+interface ShareLot {
+  id: string;
+  qty: number;
+  cost_basis: number | null;
+  opened_at: string;
+  iv: number;
+}
+
 /**
  * Add or remove the stock an assignment/call-away moves.
  *
- * Acquiring merges into an existing lot at a blended basis rather than opening
- * a second row, so coverage allocation in the Basis Tracker keeps working.
- * Disposing reduces the lot and deletes it once it is exhausted; the shares'
- * own P&L is left to that position rather than folded into the option's.
+ * Acquiring merges into the oldest lot at a blended basis rather than opening a
+ * second row, so coverage allocation in the Basis Tracker keeps working.
+ *
+ * Disposing sells FIFO across lots and archives each sold slice to
+ * history_trades with its own realized P&L — proceeds at the strike less that
+ * lot's basis. Being called away above your basis *is* a gain, and it belongs
+ * to the shares, not to the call (whose result is the premium alone).
  */
 async function applySharesDelta(trade: Trade, delta: SharesDelta, userId: string) {
   const { data: rows, error } = await supabase
@@ -117,14 +128,16 @@ async function applySharesDelta(trade: Trade, delta: SharesDelta, userId: string
     .select("*")
     .eq("portfolio_id", trade.portfolio_id)
     .eq("ticker", trade.ticker)
-    .eq("trade_type", "shares");
+    .eq("trade_type", "shares")
+    // Oldest first: FIFO, so the lot that gets called away is deterministic
+    // rather than whatever order PostgREST happened to return.
+    .order("opened_at", { ascending: true });
   if (error) throw error;
 
-  const existing = (rows ?? [])[0] as
-    | { id: string; qty: number; cost_basis: number | null }
-    | undefined;
+  const lots = (rows ?? []) as unknown as ShareLot[];
 
   if (delta.direction === "acquire") {
+    const existing = lots[0];
     if (existing) {
       const oldQty = Number(existing.qty);
       const oldBasis = existing.cost_basis == null ? null : Number(existing.cost_basis);
@@ -158,17 +171,49 @@ async function applySharesDelta(trade: Trade, delta: SharesDelta, userId: string
     return;
   }
 
-  if (!existing) return; // Nothing to remove — the cover was a LEAPS, not stock.
-  const remaining = Number(existing.qty) - delta.shares;
-  if (remaining > 0) {
-    const { error: e } = await supabase
-      .from("trades")
-      .update({ qty: remaining })
-      .eq("id", existing.id);
-    if (e) throw e;
-  } else {
-    const { error: e } = await supabase.from("trades").delete().eq("id", existing.id);
-    if (e) throw e;
+  // Nothing to remove — the cover was a LEAPS, not stock.
+  if (lots.length === 0) return;
+
+  const strike = delta.basisPerShare;
+  let toSell = delta.shares;
+
+  for (const lot of lots) {
+    if (toSell <= 0) break;
+    const lotQty = Number(lot.qty);
+    const sold = Math.min(toSell, lotQty);
+    const basis = lot.cost_basis == null ? null : Number(lot.cost_basis);
+
+    // Basis unknown means the P&L is genuinely unknown. Record the disposal
+    // with a null result rather than inventing one from the current mark.
+    const pnl = basis == null ? null : (strike - basis) * sold;
+
+    const { error: insErr } = await supabase.from("history_trades").insert({
+      user_id: userId,
+      portfolio_id: trade.portfolio_id,
+      ticker: trade.ticker,
+      trade_type: "shares",
+      entry_date: lot.opened_at,
+      exit_date: new Date().toISOString(),
+      realized_pnl: pnl,
+      iv_at_close: lot.iv,
+      // Capital that was at risk on the sold slice: stock can go to zero.
+      max_loss: basis == null ? 0 : basis * sold,
+      final_value: strike * sold,
+    });
+    if (insErr) throw insErr;
+
+    const remaining = lotQty - sold;
+    if (remaining > 0) {
+      const { error: e } = await supabase
+        .from("trades")
+        .update({ qty: remaining })
+        .eq("id", lot.id);
+      if (e) throw e;
+    } else {
+      const { error: e } = await supabase.from("trades").delete().eq("id", lot.id);
+      if (e) throw e;
+    }
+    toSell -= sold;
   }
 }
 
