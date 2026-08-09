@@ -5,7 +5,10 @@
  */
 import type { Trade } from "@/types";
 import type { Position } from "./portfolio";
-import { var95, cvar95 } from "./monteCarlo";
+import { simulatePayoff, var95, cvar95 } from "./monteCarlo";
+
+/** Must match deriveTradeMetrics' default so summed distributions line up. */
+const SIMS = 50_000;
 
 /** Dollar greeks for the book. theta is $/day, vega is $ per 1 vol point. */
 export interface PortfolioGreeks {
@@ -35,28 +38,42 @@ export interface TailRisk {
   cvar95: number;
   /** Sum of each leg's own VaR95 — the perfectly-correlated upper bound. */
   comonotonicVar95: number;
-  /** How many option legs went into the estimate. */
+  /** How many positions went into the estimate. */
   legs: number;
+  /** Horizon the book was carried to, in days — the last option expiry. */
+  horizonDays: number;
 }
 
 /**
- * Tail risk for the option book held to expiry.
+ * Tail risk for the book carried to the last option expiry.
  *
- * Two caveats that the UI must not paper over:
- *  - Each trade simulates its own independent gaussians, so summing the
- *    distributions element-wise assumes *zero* correlation between underlyings.
- *    For a concentrated book that understates the tail. `comonotonicVar95` is
- *    the opposite extreme (perfect correlation); the truth sits between them.
- *  - Shares are excluded. simulatePayoff hardcodes T = 1 year for shares, so
- *    mixing them in would blend a 1-year distribution with 30-day ones and the
- *    result would have no coherent horizon.
+ * Stock positions are included, re-simulated at that same horizon rather than
+ * their default 1-year one. That matters because a `cc` row is only the written
+ * call: without the covering shares or LEAPS in the sum, every covered call
+ * would score as a naked short call and the tail would be badly overstated.
+ *
+ * The caveat the UI must not paper over: each trade draws its own independent
+ * gaussians, so summing the distributions element-wise assumes *zero*
+ * correlation between underlyings, which understates the tail for a
+ * concentrated book. `comonotonicVar95` is the opposite extreme (perfect
+ * correlation); the truth sits between the two.
  */
 export function expiryTailRisk(positions: Position[]): TailRisk | null {
+  const optionLegs = positions.filter((p) => p.trade.trade_type !== "shares");
+  if (optionLegs.length === 0) return null;
+
+  // Carry stock to the last option expiry so both sides share one horizon.
+  const horizonDays = Math.max(...optionLegs.map((p) => p.metrics.dte));
+  const shareLegs = positions.filter((p) => p.trade.trade_type === "shares");
+
   // Both estimates must be built from the identical set of legs, or the bound
   // isn't a bound — it's a comparison of two different books.
-  const legs = positions.filter((p) => p.trade.trade_type !== "shares");
-  const dists = legs.map((p) => p.metrics.pnlDist);
-  if (dists.length === 0) return null;
+  const dists = [
+    ...optionLegs.map((p) => p.metrics.pnlDist),
+    ...shareLegs.map((p) =>
+      simulatePayoff(p.trade, horizonDays / 365, SIMS, 0, horizonDays / 365),
+    ),
+  ];
 
   const n = dists[0].length;
   const total = new Float64Array(n);
@@ -76,6 +93,7 @@ export function expiryTailRisk(positions: Position[]): TailRisk | null {
     cvar95: cvar95(total),
     comonotonicVar95: comonotonic,
     legs: dists.length,
+    horizonDays,
   };
 }
 

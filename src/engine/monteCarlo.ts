@@ -33,10 +33,21 @@ export function simulatePayoff(
   dteYears: number,
   sims = 50_000,
   mu = 0,
+  /**
+   * Forces the simulation horizon in years, overriding the per-type default.
+   * Needed to line shares up with the option book: shares have no expiry, so
+   * they otherwise default to 1 year and can't be summed with 30-day legs.
+   */
+  horizonYears?: number,
 ): Float64Array {
   const S0 = trade.underlying_price ?? 0;
   const iv = trade.iv;
-  const T = trade.trade_type === "shares" ? 1.0 : Math.max(dteYears, 0);
+  const T =
+    horizonYears != null
+      ? Math.max(horizonYears, 0)
+      : trade.trade_type === "shares"
+        ? 1.0
+        : Math.max(dteYears, 0);
 
   const half = Math.floor(sims / 2);
   const ST = new Float64Array(half * 2);
@@ -109,12 +120,13 @@ export function payoffAtPrices(
         p = longPnl + shortPnl - Math.abs(premium) * mult;
         break;
       }
-      case "cc": {
-        const stockPnl = (s - S0) * qty;
-        const callPnl = -max(s - K1, 0) * mult + premium * mult;
-        p = stockPnl + callPnl;
+      case "cc":
+        // A cc row is the written call only — the covering shares or LEAPS are
+        // tracked as their own position (see deriveBasisPositions, which
+        // allocates cc contracts against them). Carrying a stock leg here would
+        // double-count the underlying, so the payoff is a plain short call.
+        p = -max(s - K1, 0) * mult + premium * mult;
         break;
-      }
       case "shares":
         p = (s - S0) * qty;
         break;

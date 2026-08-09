@@ -48,7 +48,6 @@ export function maxGain(trade: Trade): number {
   const prem = trade.premium ?? 0;
   const K1 = trade.strike ?? 0;
   const K2 = trade.strike_2 ?? 0;
-  const S = trade.underlying_price ?? 0;
 
   switch (t) {
     case "shares":
@@ -60,7 +59,10 @@ export function maxGain(trade: Trade): number {
     case "pcs":
       return prem * 100 * qty;
     case "cc":
-      return (K1 - S + prem) * 100 * qty;
+      // Premium only. The textbook (K - S + prem) covered-call max gain folds in
+      // the stock's run to the strike, but that belongs to the covering shares
+      // or LEAPS position, which is tracked separately.
+      return prem * 100 * qty;
     case "cds":
     case "pds":
       return (Math.abs(K2 - K1) - Math.abs(prem)) * 100 * qty;

@@ -99,9 +99,9 @@ export function theoreticalValue(
     return t === "ccs" ? -v1 + v2 : v1 - v2;
   }
   if (t === "cc") {
-    const stockVal = S * trade.qty;
-    const callVal = bsPrice(S, K1, T, iv, r, "call") * mult;
-    return stockVal - callVal;
+    // The written call only; the covering shares/LEAPS are a separate position.
+    // Same reasoning as the cc case in payoffAtPrices.
+    return -bsPrice(S, K1, T, iv, r, "call") * mult;
   }
   return 0;
 }
