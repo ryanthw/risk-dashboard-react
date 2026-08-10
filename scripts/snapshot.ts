@@ -19,14 +19,35 @@ import { refreshPortfolio } from "@/lib/refreshPortfolio";
 import type { Portfolio, Trade } from "@/types";
 
 /**
+ * Strips what env files smuggle in: CRLF carriage returns, stray surrounding
+ * whitespace, and matching wrapper quotes. A password arriving with a trailing
+ * \r fails auth with the same "Invalid login credentials" as a wrong password,
+ * which is indistinguishable without this.
+ */
+function clean(raw: string): string {
+  let v = raw.trim();
+  const q = v[0];
+  if (v.length >= 2 && (q === '"' || q === "'") && v.endsWith(q)) {
+    v = v.slice(1, -1);
+  }
+  return v;
+}
+
+/** Names whose value was altered by clean(), for the failure diagnostic. */
+const sanitized = new Set<string>();
+
+/**
  * Reads the first name that is set. The VITE_-prefixed fallbacks let a local
  * run reuse .env.local instead of duplicating the same URL and key under a
  * second set of names; CI supplies the unprefixed ones as secrets.
  */
 function required(...names: string[]): string {
   for (const n of names) {
-    const v = process.env[n];
-    if (v) return v;
+    const raw = process.env[n];
+    if (raw == null || raw === "") continue;
+    const v = clean(raw);
+    if (v !== raw) sanitized.add(n);
+    return v;
   }
   console.error(`Missing required env var: ${names.join(" or ")}`);
   process.exit(2);
@@ -50,6 +71,19 @@ async function main() {
   });
   if (authErr || !auth.user) {
     console.error(`Sign-in failed: ${authErr?.message ?? "no user returned"}`);
+    // Enough to spot a malformed env value without printing the secret.
+    console.error(`  email        ${JSON.stringify(email)}`);
+    console.error(`  password     ${password.length} chars`);
+    console.error(`  project host ${new URL(url).host}`);
+    if (sanitized.size > 0) {
+      console.error(
+        `  note: stripped quotes/whitespace from ${[...sanitized].join(", ")}`,
+      );
+    }
+    console.error(
+      "  If the password length is wrong, the env file is mangling it — try\n" +
+        "  single-quoting the value, or export it in the shell instead.",
+    );
     process.exit(1);
   }
   const userId = auth.user.id;
