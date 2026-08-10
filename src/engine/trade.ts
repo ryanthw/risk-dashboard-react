@@ -41,6 +41,19 @@ export function tradeValue(trade: Trade): number {
   return Math.abs(trade.premium ?? 0) * 100 * trade.qty;
 }
 
+/**
+ * Unrealized P&L on a stock lot: mark less what it cost.
+ *
+ * Only shares. Their simulated E[P] runs GBM at a one-year horizon with zero
+ * drift, so it mostly reports volatility rather than any view on the name —
+ * the mark-to-basis figure is a fact and more useful on the tile. Returns null
+ * when the lot has no recorded basis, which is an unknown, not a zero.
+ */
+export function unrealizedSharesPnl(trade: Trade): number | null {
+  if (trade.trade_type !== "shares" || trade.cost_basis == null) return null;
+  return ((trade.underlying_price ?? 0) - trade.cost_basis) * trade.qty;
+}
+
 /** Maximum gain by strategy. Ported from Trade.max_gain. */
 export function maxGain(trade: Trade): number {
   const t = trade.trade_type;
