@@ -158,10 +158,30 @@ export function netLiquidity(positions: Position[], cash: number): number {
   return liq;
 }
 
+/**
+ * Cash free to deploy — buying power, with collateral held back.
+ *
+ * Shares and long options need no reservation: their cost already left the
+ * balance when the position was opened.
+ *
+ * Naked short calls are *not* reserved. Their requirement is a broker margin
+ * formula, not a figure derivable from the position, so this overstates
+ * available cash when one is open — the Dashboard flags those separately as
+ * undefined-risk positions.
+ */
 export function undeployedCash(positions: Position[], cash: number): number {
   let c = cash;
   for (const { trade, metrics } of positions) {
-    if (["csp", "pcs", "ccs"].includes(trade.trade_type)) c -= metrics.maxLoss;
+    const t = trade.trade_type;
+    if (t === "csp" || t === "short_put") {
+      // Cash-secured means the whole strike is held. Reserving maxLoss instead
+      // (strike less premium) frees up the credit, but the credit is already
+      // sitting in `cash` — so that double-counts it as available.
+      c -= (trade.strike ?? 0) * 100 * trade.qty;
+    } else if (t === "pcs" || t === "ccs") {
+      // Vertical credit spreads are held at max loss: width less the credit.
+      if (Number.isFinite(metrics.maxLoss)) c -= metrics.maxLoss;
+    }
   }
   return c;
 }
