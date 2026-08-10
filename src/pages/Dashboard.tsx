@@ -252,9 +252,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Stat tiles. */}
+      {/* Stat tiles. Four columns, grouped so no card carries the bulk: the
+          risk-adjusted ratios used to land in the same card as exposure and
+          tail risk, which left it at eleven rows against six. */}
       {stats ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card>
             <CardContent className="space-y-2 pt-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -266,18 +268,18 @@ export default function Dashboard() {
                 tone={theta >= 0 ? "gain" : "loss"}
               />
               <StatRow
-                label="Theta % of net liq"
+                label="Theta % net liq"
                 value={fmtPct(stats.netLiq > 0 ? (theta / stats.netLiq) * 100 : 0, 2)}
               />
-              <StatRow label="Vega (per vol pt)" value={fmtUsd(stats.greeks.vega)} />
-              <StatRow label="Beta-weighted delta" value={fmtNum(stats.betaDelta, 0)} />
+              <StatRow label="Vega / vol pt" value={fmtUsd(stats.greeks.vega)} />
+              <StatRow label="Beta-wtd Delta" value={fmtNum(stats.betaDelta, 0)} />
               <StatRow label="Expected Returns" value={fmtUsd(stats.expReturns)} />
-              <StatRow label="ERPA (annualized)" value={fmtPct(stats.erAnn)} />
+              <StatRow label="ERPA (ann.)" value={fmtPct(stats.erAnn)} />
               {erpaRank && (
                 <StatRow
-                  label="ERPA vs own history"
+                  label="ERPA percentile"
                   tone="muted"
-                  value={`${fmtPct(erpaRank.percentile, 0)} pctile · n=${erpaRank.n}`}
+                  value={`${fmtPct(erpaRank.percentile, 0)} · n=${erpaRank.n}`}
                 />
               )}
             </CardContent>
@@ -286,14 +288,33 @@ export default function Dashboard() {
           <Card>
             <CardContent className="space-y-2 pt-5">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Risk & Exposure
+                Exposure
               </p>
               <StatRow label="Percent Exposure" value={fmtPct(stats.pctExposure)} />
               <StatRow
-                label="HHI (Concentration)"
+                label="HHI"
                 value={`${fmtNum(stats.hhi)}${stats.largest ? ` · ${stats.largest.ticker}` : ""}`}
               />
               <StatRow label="Leverage Ratio" value={fmtMultiple(stats.leverage)} />
+              <StatRow label="Highest Position" value={fmtPct(stats.highestPos)} />
+              <StatRow label="Collateral Held" value={fmtUsd(cash - stats.undeployed)} />
+              <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-2 pt-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Tail & Risk-Adjusted
+              </p>
+              {stats.tail ? (
+                <>
+                  <StatRow label="VaR 95%" tone="loss" value={fmtUsd(stats.tail.var95)} />
+                  <StatRow label="CVaR 95%" tone="loss" value={fmtUsd(stats.tail.cvar95)} />
+                </>
+              ) : (
+                <StatRow label="VaR 95%" tone="muted" value="No option legs" />
+              )}
               {/* Omitted entirely below MIN_SNAPSHOTS_FOR_SHARPE observations:
                   a Sharpe off a handful of snapshots describes the sample, not
                   the strategy, and a caveat under it would not stop it being
@@ -301,34 +322,25 @@ export default function Dashboard() {
               {risk && (
                 <>
                   <StatRow
-                    label="Sharpe (annualized)"
+                    label="Sharpe (ann.)"
                     tone={risk.sharpe >= 1 ? "gain" : "info"}
                     value={fmtNum(risk.sharpe)}
                   />
                   <StatRow label="Sortino" value={fmtNum(risk.sortino)} />
                   <StatRow
-                    label="Realized Vol (ann.)"
+                    label="Realized Vol"
                     value={fmtPct(risk.annualizedVol * 100, 1)}
                   />
                 </>
               )}
-              <StatRow label="Highest Position" value={fmtPct(stats.highestPos)} />
-              <StatRow label="Collateral Held" value={fmtUsd(cash - stats.undeployed)} />
-              <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
-              {stats.tail ? (
-                <>
-                  <StatRow label="VaR 95%" tone="loss" value={fmtUsd(stats.tail.var95)} />
-                  <StatRow label="CVaR 95%" tone="loss" value={fmtUsd(stats.tail.cvar95)} />
-                  {/* The two extremes bracket the real number; showing only the
-                      independent one would quietly understate a concentrated book. */}
-                  <p className="pt-1 text-xs text-muted-foreground">
-                    Whole book carried {Math.round(stats.tail.horizonDays)}d to the last
-                    expiry, assuming uncorrelated underlyings. Perfectly correlated worst
-                    case: {fmtUsd(stats.tail.comonotonicVar95)}.
-                  </p>
-                </>
-              ) : (
-                <StatRow label="VaR 95%" tone="muted" value="No option legs" />
+              {stats.tail && (
+                /* The two extremes bracket the real number; showing only the
+                   independent one would quietly understate a concentrated book. */
+                <p className="pt-1 text-xs text-muted-foreground">
+                  Whole book carried {Math.round(stats.tail.horizonDays)}d to the last
+                  expiry, assuming uncorrelated underlyings. Perfectly correlated worst
+                  case: {fmtUsd(stats.tail.comonotonicVar95)}.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -359,17 +371,14 @@ export default function Dashboard() {
                     label="Profit Factor"
                     value={record.profitFactor == null ? "No losses yet" : fmtNum(record.profitFactor)}
                   />
-                  <StatRow label="Expectancy / trade" value={fmtUsd(record.expectancy)} />
+                  <StatRow label="Expectancy" value={fmtUsd(record.expectancy)} />
                   <StatRow label="Avg Win" value={fmtUsd(record.avgWin)} />
                   <StatRow label="Avg Loss" value={fmtUsd(-record.avgLoss)} />
                   {record.avgHoldDays != null && (
                     <StatRow label="Avg Hold" value={`${fmtNum(record.avgHoldDays, 1)}d`} />
                   )}
                   {record.returnOnRisk != null && (
-                    <StatRow
-                      label="Return on Risk"
-                      value={fmtPct(record.returnOnRisk, 1)}
-                    />
+                    <StatRow label="Return on Risk" value={fmtPct(record.returnOnRisk, 1)} />
                   )}
                   {record.unbooked > 0 && (
                     <StatRow
