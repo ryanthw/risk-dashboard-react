@@ -13,6 +13,7 @@ import { useDeleteTrade } from "@/api/trades";
 import { fmtUsd, fmtPct, pnlClass } from "@/lib/format";
 import { TRADE_TYPE_LABELS } from "@/types";
 import type { Position } from "@/engine/portfolio";
+import { unrealizedSharesPnl } from "@/engine/trade";
 import {
   EXIT_PATH_LABELS,
   availableExitPaths,
@@ -33,6 +34,7 @@ export function TradeCard({ position }: { position: Position }) {
   // keystroke turns "" into 0 and makes the placeholder zero undeletable.
   const [amount, setAmount] = useState("");
 
+  const unrealized = unrealizedSharesPnl(trade);
   const paths = availableExitPaths(trade.trade_type);
   const isDebitClose = closeIsDebit(trade.trade_type);
   const amountNum = Number(amount);
@@ -99,14 +101,29 @@ export function TradeCard({ position }: { position: Position }) {
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div>
-          <p className={`text-sm font-semibold tnum ${pnlClass(metrics.expectedProfit)}`}>
-            {fmtUsd(metrics.expectedProfit)}
-          </p>
-          <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
-            E[P]
-          </p>
-        </div>
+        {/* Shares show mark-to-basis instead of E[P]: a one-year zero-drift
+            simulation of a stock is a volatility readout, not a forecast. */}
+        {trade.trade_type === "shares" ? (
+          <div>
+            <p
+              className={`text-sm font-semibold tnum ${unrealized == null ? "text-muted-foreground" : pnlClass(unrealized)}`}
+            >
+              {unrealized == null ? "—" : fmtUsd(unrealized)}
+            </p>
+            <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+              {unrealized == null ? "No basis" : "Unreal. P/L"}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <p className={`text-sm font-semibold tnum ${pnlClass(metrics.expectedProfit)}`}>
+              {fmtUsd(metrics.expectedProfit)}
+            </p>
+            <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+              E[P]
+            </p>
+          </div>
+        )}
         <div>
           <p className="text-sm font-semibold tnum">{fmtPct(metrics.pop * 100, 1)}</p>
           <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
