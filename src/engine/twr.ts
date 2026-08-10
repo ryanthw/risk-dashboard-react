@@ -57,6 +57,7 @@ export interface TwrResult {
 /** Annualizing a handful of days turns noise into a headline number. */
 const MIN_SPAN_DAYS_TO_ANNUALIZE = 60;
 
+
 /**
  * Below this many snapshots a Sharpe ratio is an artifact of the sample rather
  * than a property of the strategy, so it is not reported at all. Omitting it
