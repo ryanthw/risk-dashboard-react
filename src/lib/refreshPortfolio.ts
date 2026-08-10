@@ -160,9 +160,17 @@ export async function refreshPortfolio(
 }
 
 /**
- * One snapshot per portfolio per day, timestamped to a fixed hour so repeated
- * runs land in the same bucket regardless of when they fire. Returns false when
- * the day already has one.
+ * One snapshot per portfolio per day. Returns false when the day already has one.
+ *
+ * Stamped at the moment it is taken, not normalized to a fixed hour. The
+ * normalization used to backdate every snapshot to 16:00 UTC, which broke the
+ * invariant TWR depends on: that a snapshot's value reflects exactly the flows
+ * dated at or before its timestamp. Deposit at 18:00 and refresh at 18:05 and
+ * the balance jumped with no flow to explain it, then the flow turned up in the
+ * next period where the balance had not moved — a phantom gain followed by a
+ * phantom loss, which does not cancel and wrecks the volatility estimate.
+ *
+ * Dedupe still buckets by UTC calendar day, matching the one-per-day index.
  */
 export async function recordSnapshot(
   client: SupabaseClient,
@@ -172,7 +180,6 @@ export async function recordSnapshot(
   now = new Date(),
 ): Promise<boolean> {
   const stamped = new Date(now);
-  stamped.setUTCHours(16, 0, 0, 0);
   const dayStart = new Date(stamped);
   dayStart.setUTCHours(0, 0, 0, 0);
   const dayEnd = new Date(stamped);
