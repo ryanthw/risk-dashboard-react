@@ -1,83 +1,47 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { fetchQuote } from "@/api/marketData";
-import { useRecordSnapshot } from "@/api/history";
-import { deriveTradeMetrics } from "@/engine/trade";
-import { snapshotMetrics, type Position } from "@/engine/portfolio";
+import { refreshPortfolio } from "@/lib/refreshPortfolio";
+import { useAuth } from "@/store/auth";
 import type { Portfolio, Trade } from "@/types";
 import { toast } from "@/components/ui/toast";
 
 /**
- * Refreshes live prices/IV for every unique ticker in a portfolio, persists the
- * updates, then records a daily snapshot. Mirrors utils.update_underlyings +
- * capture_and_save_snapshot.
+ * Refreshes live prices/IV for every ticker in a portfolio, persists the
+ * updates, then records the day's snapshot.
+ *
+ * The sequence lives in lib/refreshPortfolio so the scheduled job runs exactly
+ * the same code. This hook only supplies the client and turns the report into
+ * toasts. Unlike the unattended job it still logs a snapshot when some quotes
+ * were degraded — someone is watching and can see the warning.
  */
 export function useRefreshMarketData(portfolio: Portfolio | undefined, trades: Trade[]) {
   const [refreshing, setRefreshing] = useState(false);
   const qc = useQueryClient();
-  const recordSnapshot = useRecordSnapshot();
+  const { user } = useAuth();
 
   const refresh = async () => {
-    if (!portfolio) return;
+    if (!portfolio || !user) return;
     setRefreshing(true);
     try {
-      // 1. Fetch quotes for unique tickers.
-      const tickers = [...new Set(trades.map((t) => t.ticker))];
-      const quotes = new Map<string, Awaited<ReturnType<typeof fetchQuote>>>();
-      await Promise.all(
-        tickers.map(async (tk) => {
-          try {
-            quotes.set(tk, await fetchQuote(tk));
-          } catch {
-            /* leave stale on failure */
-          }
-        }),
-      );
-
-      // 2. Persist updated underlyings (and IV for shares).
-      const updated: Trade[] = [];
-      for (const t of trades) {
-        const q = quotes.get(t.ticker);
-        if (!q || q.price <= 0) {
-          updated.push(t);
-          continue;
-        }
-        const next: Trade = {
-          ...t,
-          underlying_price: Number(q.price.toFixed(2)),
-          iv: t.trade_type === "shares" ? q.hv : t.iv,
-          sector: q.sector || t.sector,
-          beta: q.beta || t.beta,
-        };
-        updated.push(next);
-        await supabase
-          .from("trades")
-          .update({
-            underlying_price: next.underlying_price,
-            iv: next.iv,
-            sector: next.sector,
-            beta: next.beta,
-          })
-          .eq("id", t.id);
-      }
+      const report = await refreshPortfolio(supabase, user.id, portfolio, trades);
       await qc.invalidateQueries({ queryKey: ["trades", portfolio.id] });
+      await qc.invalidateQueries({ queryKey: ["snapshots", portfolio.id] });
 
-      // 3. Record snapshot from refreshed positions.
-      const positions: Position[] = updated.map((trade) => ({
-        trade,
-        metrics: deriveTradeMetrics(trade),
-      }));
-      const metrics = snapshotMetrics(positions, portfolio.cash);
-      const res = await recordSnapshot.mutateAsync({
-        portfolio_id: portfolio.id,
-        ...metrics,
-      });
-
-      toast.success(
-        "Market data refreshed",
-        res?.skipped ? "Snapshot already logged today" : "Snapshot logged",
-      );
+      if (report.rejected.length > 0) {
+        const worst = report.rejected[0];
+        toast.error(
+          `Rejected ${report.rejected.length} quote${report.rejected.length === 1 ? "" : "s"}`,
+          `${worst.ticker} quoted ${worst.quoted} vs stored ${worst.stored} — kept the stored price`,
+        );
+      } else if (report.failed.length > 0) {
+        toast.error("Some quotes failed", `${report.failed.join(", ")} kept stale prices`);
+      } else {
+        toast.success(
+          "Market data refreshed",
+          report.snapshotLogged ? "Snapshot logged" : "Snapshot already logged today",
+        );
+      }
     } catch (e) {
       toast.error("Refresh failed", String((e as Error).message));
     } finally {
