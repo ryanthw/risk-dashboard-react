@@ -236,46 +236,7 @@ export function useSnapshots(portfolioId: string | null) {
   });
 }
 
-export interface SnapshotInput {
-  portfolio_id: string;
-  net_liquidity: number;
-  weighted_delta: number;
-  expected_profit_total: number;
-  erpa: number;
-}
-
-/** Upsert one snapshot per portfolio per day (standardized to 16:00). */
-export function useRecordSnapshot() {
-  const qc = useQueryClient();
-  const { user } = useAuth();
-  return useMutation({
-    mutationFn: async (input: SnapshotInput) => {
-      const now = new Date();
-      now.setUTCHours(16, 0, 0, 0);
-      // Check existing snapshot for today to avoid duplicates.
-      const dayStart = new Date(now);
-      dayStart.setUTCHours(0, 0, 0, 0);
-      const dayEnd = new Date(now);
-      dayEnd.setUTCHours(23, 59, 59, 999);
-
-      const { data: existing } = await supabase
-        .from("history_snapshots")
-        .select("id")
-        .eq("portfolio_id", input.portfolio_id)
-        .gte("ts", dayStart.toISOString())
-        .lte("ts", dayEnd.toISOString());
-
-      if (existing && existing.length > 0) return { skipped: true };
-
-      const { error } = await supabase.from("history_snapshots").insert({
-        ...input,
-        user_id: user!.id,
-        ts: now.toISOString(),
-      });
-      if (error) throw error;
-      return { skipped: false };
-    },
-    onSuccess: (_d, vars) =>
-      qc.invalidateQueries({ queryKey: ["snapshots", vars.portfolio_id] }),
-  });
-}
+// Snapshots are written by lib/refreshPortfolio, which both the app and the
+// scheduled job call. There is deliberately no second writer here: the previous
+// one kept its own copy of the one-per-day and timestamp logic, and the two
+// could drift apart silently.
