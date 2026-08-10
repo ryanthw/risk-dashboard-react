@@ -57,6 +57,86 @@ export interface TwrResult {
 /** Annualizing a handful of days turns noise into a headline number. */
 const MIN_SPAN_DAYS_TO_ANNUALIZE = 60;
 
+/**
+ * Below this many snapshots a Sharpe ratio is an artifact of the sample rather
+ * than a property of the strategy, so it is not reported at all. Omitting it
+ * beats showing a number with a caveat nobody reads.
+ */
+export const MIN_SNAPSHOTS_FOR_SHARPE = 30;
+
+export interface RiskAdjusted {
+  /** Annualized drift of the flow-adjusted return series. */
+  annualizedReturn: number;
+  /** Annualized volatility. */
+  annualizedVol: number;
+  sharpe: number;
+  /** Sharpe with only downside deviation in the denominator. */
+  sortino: number;
+  /** Sub-periods behind the estimate; snapshots is this plus one. */
+  periods: number;
+}
+
+/**
+ * Sharpe and Sortino from irregularly-spaced snapshots.
+ *
+ * Snapshot gaps vary, so the usual "mean over stdev times root-252" is wrong
+ * here — it would treat a one-day return and a nine-day return as the same
+ * observation and understate volatility. Instead the log returns are modelled
+ * as increments of a drifting Brownian motion, where an increment over dt has
+ * variance sigma^2 * dt. Drift comes from total log return over total elapsed
+ * time, and sigma from the per-increment residuals scaled by their own dt.
+ * That reduces to the textbook formula when spacing happens to be even.
+ *
+ * Input is the TWR sub-period returns, so deposits are already stripped out —
+ * running this on raw balance changes would read contributions as volatility.
+ *
+ * Returns null below MIN_SNAPSHOTS_FOR_SHARPE observations.
+ */
+export function riskAdjusted(twr: TwrResult, riskFreeRate = 0.04): RiskAdjusted | null {
+  const usable = twr.periods.filter((p) => p.end > p.start && p.ret > -1);
+  // periods are the gaps between snapshots, so n snapshots give n-1 periods.
+  if (usable.length + 1 < MIN_SNAPSHOTS_FOR_SHARPE) return null;
+
+  const incs = usable.map((p) => ({
+    x: Math.log(1 + p.ret),
+    dt: (p.end - p.start) / MS_PER_DAY / 365,
+  }));
+  const totalT = incs.reduce((a, i) => a + i.dt, 0);
+  if (totalT <= 0) return null;
+
+  const totalLog = incs.reduce((a, i) => a + i.x, 0);
+  const drift = totalLog / totalT;
+
+  // Residual per unit time: each increment's deviation from the drift it should
+  // have accumulated over its own length.
+  let varSum = 0;
+  let downSum = 0;
+  let downCount = 0;
+  for (const i of incs) {
+    const resid = i.x - drift * i.dt;
+    varSum += (resid * resid) / i.dt;
+    if (i.x < 0) {
+      downSum += (i.x * i.x) / i.dt;
+      downCount++;
+    }
+  }
+  const variance = varSum / incs.length;
+  const annualizedVol = Math.sqrt(Math.max(variance, 0));
+  const downsideVol = downCount > 0 ? Math.sqrt(downSum / incs.length) : 0;
+
+  // Geometric drift back to a simple annual rate for display.
+  const annualizedReturn = Math.exp(drift) - 1;
+  const excess = annualizedReturn - riskFreeRate;
+
+  return {
+    annualizedReturn,
+    annualizedVol,
+    sharpe: annualizedVol > 0 ? excess / annualizedVol : 0,
+    sortino: downsideVol > 0 ? excess / downsideVol : 0,
+    periods: incs.length,
+  };
+}
+
 export function computeTwr(
   snapshots: Snapshot[],
   ledger: LedgerEntry[],

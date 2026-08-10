@@ -22,7 +22,8 @@ import * as P from "@/engine/portfolio";
 import * as R from "@/engine/portfolioRisk";
 import { trackRecord } from "@/engine/trackRecord";
 import { curveStats, selfPercentile } from "@/engine/equityCurve";
-import { computeTwr } from "@/engine/twr";
+import { computeTwr, riskAdjusted } from "@/engine/twr";
+import { RISK_FREE_RATE } from "@/engine/blackScholes";
 
 // Kept in sync with fmtUsd in lib/format so the animated readout and the
 // static fallback render identically.
@@ -78,6 +79,10 @@ export default function Dashboard() {
   const twr = useMemo(
     () => (ledgerReady ? computeTwr(snapshots ?? [], cashFlows ?? []) : null),
     [snapshots, cashFlows, ledgerReady],
+  );
+  const risk = useMemo(
+    () => (twr ? riskAdjusted(twr, RISK_FREE_RATE) : null),
+    [twr],
   );
   const erpaRank = useMemo(() => selfPercentile(snapshots ?? [], "erpa"), [snapshots]);
   const record = useMemo(() => trackRecord(closedTrades ?? []), [closedTrades]);
@@ -289,6 +294,24 @@ export default function Dashboard() {
                 value={`${fmtNum(stats.hhi)}${stats.largest ? ` · ${stats.largest.ticker}` : ""}`}
               />
               <StatRow label="Leverage Ratio" value={fmtMultiple(stats.leverage)} />
+              {/* Omitted entirely below MIN_SNAPSHOTS_FOR_SHARPE observations:
+                  a Sharpe off a handful of snapshots describes the sample, not
+                  the strategy, and a caveat under it would not stop it being
+                  read as a result. */}
+              {risk && (
+                <>
+                  <StatRow
+                    label="Sharpe (annualized)"
+                    tone={risk.sharpe >= 1 ? "gain" : "info"}
+                    value={fmtNum(risk.sharpe)}
+                  />
+                  <StatRow label="Sortino" value={fmtNum(risk.sortino)} />
+                  <StatRow
+                    label="Realized Vol (ann.)"
+                    value={fmtPct(risk.annualizedVol * 100, 1)}
+                  />
+                </>
+              )}
               <StatRow label="Highest Position" value={fmtPct(stats.highestPos)} />
               <StatRow label="Collateral Held" value={fmtUsd(cash - stats.undeployed)} />
               <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
