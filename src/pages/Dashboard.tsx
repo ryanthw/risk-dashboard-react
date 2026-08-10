@@ -24,7 +24,7 @@ import { trackRecord } from "@/engine/trackRecord";
 import { curveStats, selfPercentile } from "@/engine/equityCurve";
 import { computeTwr } from "@/engine/twr";
 
-// Kept in sync with fmtUsd/fmtNum in lib/format so the animated readout and the
+// Kept in sync with fmtUsd in lib/format so the animated readout and the
 // static fallback render identically.
 const USD_FMT: Format = {
   style: "currency",
@@ -32,11 +32,6 @@ const USD_FMT: Format = {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 };
-const NUM_FMT: Format = {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-};
-
 /** Positions expiring inside this window are surfaced as needing attention. */
 const EXPIRY_WARN_DAYS = 7;
 
@@ -135,11 +130,17 @@ export default function Dashboard() {
           format={USD_FMT}
         />
         <Metric
-          label="HHI (Concentration)"
-          value={fmtNum(stats?.hhi ?? 0)}
-          animate={stats?.hhi ?? 0}
-          format={NUM_FMT}
-          hint={stats?.largest ? `${stats.largest.ticker} largest` : undefined}
+          label="Buying Power"
+          value={fmtUsd(stats?.undeployed ?? cash)}
+          animate={stats?.undeployed ?? cash}
+          format={USD_FMT}
+          hint={
+            stats?.undefinedRisk
+              ? "excl. naked short calls"
+              : stats
+                ? `of ${fmtUsd(cash)} cash`
+                : undefined
+          }
         />
         <Metric
           label="Open Trades"
@@ -283,9 +284,13 @@ export default function Dashboard() {
                 Risk & Exposure
               </p>
               <StatRow label="Percent Exposure" value={fmtPct(stats.pctExposure)} />
+              <StatRow
+                label="HHI (Concentration)"
+                value={`${fmtNum(stats.hhi)}${stats.largest ? ` · ${stats.largest.ticker}` : ""}`}
+              />
               <StatRow label="Leverage Ratio" value={fmtMultiple(stats.leverage)} />
               <StatRow label="Highest Position" value={fmtPct(stats.highestPos)} />
-              <StatRow label="Undeployed Cash" value={fmtUsd(stats.undeployed)} />
+              <StatRow label="Collateral Held" value={fmtUsd(cash - stats.undeployed)} />
               <StatRow label="Cash Percent" value={fmtPct(stats.cashPct)} />
               {stats.tail ? (
                 <>

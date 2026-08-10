@@ -19,6 +19,7 @@ import {
 } from "@/components/charts/echartsTheme";
 import { EmptyState, LoadingState, NoPortfolio, SectionTitle } from "@/components/ui/states";
 import { useActivePortfolio } from "@/hooks/useActivePortfolio";
+import { antiCorrelation, tickerExposures } from "@/engine/correlation";
 import { betaWeightedDelta } from "@/engine/portfolio";
 import { fetchBatchCloses, correlationMatrix } from "@/api/marketData";
 import { isSupabaseConfigured } from "@/lib/supabase";
@@ -74,28 +75,9 @@ export default function Strategy() {
 
   const antiCorr = useMemo(() => {
     const corr = corrQuery.data;
-    if (!corr || corr.tickers.length < 2) return null;
-    const weights: Record<string, number> = {};
-    for (const t of corr.tickers) {
-      weights[t] = agg.totalRisk > 0 ? (agg.byTicker[t]?.risk ?? 0) / agg.totalRisk : 0;
-    }
-    let wcs = 0;
-    let wps = 0;
-    const flags: { pair: string; corr: number }[] = [];
-    for (let i = 0; i < corr.tickers.length; i++) {
-      for (let j = i + 1; j < corr.tickers.length; j++) {
-        const t1 = corr.tickers[i];
-        const t2 = corr.tickers[j];
-        const c = corr.matrix[i][j];
-        const w = weights[t1] * weights[t2];
-        wcs += c * w;
-        wps += w;
-        if (c > 0.75) flags.push({ pair: `${t1} / ${t2}`, corr: c });
-      }
-    }
-    const avg = wps > 0 ? wcs / wps : 0;
-    return { score: 1 - avg, flags };
-  }, [corrQuery.data, agg]);
+    if (!corr) return null;
+    return antiCorrelation(corr.tickers, corr.matrix, tickerExposures(positions));
+  }, [corrQuery.data, positions]);
 
   // ECharts takes the hierarchy natively, so no parallel label/parent arrays.
   const treemapOption = useMemo<EChartsOption>(() => {
@@ -262,8 +244,12 @@ export default function Strategy() {
         <Metric
           label="Anti-Correlation Score"
           value={antiCorr ? fmtNum(antiCorr.score) : "—"}
-          hint="Diversification (goal > 0.60)"
-          accent={antiCorr && antiCorr.score > 0.6 ? "gain" : "default"}
+          hint={
+            antiCorr
+              ? `avg \u03c1 ${antiCorr.avgCorrelation.toFixed(2)} across ${antiCorr.pairs} pairs · 1.00 = uncorrelated`
+              : "Needs two or more tickers"
+          }
+          accent={antiCorr && antiCorr.score > 1 ? "gain" : "default"}
         />
         <Metric
           label="Beta-Weighted Delta"
@@ -355,7 +341,7 @@ export default function Strategy() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   {antiCorr.flags.map((f) => (
                     <Badge key={f.pair} variant="loss">
-                      {f.pair}: ρ {f.corr.toFixed(2)}
+                      {f.pair}: ρ {f.effectiveCorr.toFixed(2)}
                     </Badge>
                   ))}
                 </div>
