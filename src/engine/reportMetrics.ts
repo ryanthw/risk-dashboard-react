@@ -8,7 +8,8 @@
  * of the app, which is the one thing a statement must never do.
  */
 import type { HistoryTrade, Snapshot } from "@/types";
-import type { Position } from "./portfolio";
+import { hhi, type Position } from "./portfolio";
+import { largestTickerRisk } from "./portfolioRisk";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -99,19 +100,36 @@ export function tradesInPeriod(trades: HistoryTrade[], period: Period): HistoryT
 }
 
 // ---------------------------------------------------------------------------
-// Exposure, concentration, leverage
+// Exposure and concentration
+//
+// Two different questions, deliberately kept apart:
+//
+//   Capital at risk — how much money can actually be lost. In a cash account
+//   this is the binding constraint and cannot exceed the account, so the ratio
+//   to portfolio value is bounded at 1.0x. It is what `leverageRatio` in
+//   portfolio.ts measures, and it is the primary number.
+//
+//   Notional exposure — how much underlying the book moves with, from delta.
+//   A deep ITM long call costing $930 carries $2,200 of it. That is real and
+//   worth reporting, but it is NOT leverage: no money is borrowed and nothing
+//   beyond the premium can be lost. Reporting it as leverage overstates the
+//   risk of a strategy whose entire point is bounded downside.
 // ---------------------------------------------------------------------------
 
 export interface TickerExposure {
   ticker: string;
   /** Share-equivalent delta: $ P&L per $1 move in the underlying. */
   shareDelta: number;
-  /** shareDelta x spot — the dollar of underlying the book is actually long. */
-  exposure: number;
-  /** Signed exposure as a % of net liquidity. */
+  /** shareDelta x spot — how much underlying the book moves with. */
+  notional: number;
+  /** Signed notional as a % of net liquidity. */
   pctOfNav: number;
+  /** Sum of each leg's max loss — the money genuinely at stake on this name. */
+  capitalAtRisk: number;
+  /** True when a leg on this ticker has unbounded loss (a naked short call). */
+  undefinedRisk: boolean;
   beta: number;
-  /** exposure x beta — exposure restated in index-equivalent dollars. */
+  /** notional x beta — restated in index-equivalent dollars. */
   betaWeighted: number;
   legs: number;
 }
@@ -125,7 +143,17 @@ export interface TickerExposure {
  * report a concentration the book does not have.
  */
 export function exposureByTicker(positions: Position[], netLiq: number): TickerExposure[] {
-  const byTicker = new Map<string, { delta: number; beta: number; legs: number }>();
+  const byTicker = new Map<
+    string,
+    {
+      delta: number;
+      beta: number;
+      legs: number;
+      spot: number;
+      risk: number;
+      undefinedRisk: boolean;
+    }
+  >();
 
   for (const { trade, metrics } of positions) {
     const spot = trade.underlying_price ?? 0;
@@ -133,120 +161,141 @@ export function exposureByTicker(positions: Position[], netLiq: number): TickerE
     const delta = metrics.greeks.delta;
     if (!Number.isFinite(delta)) continue;
 
+    // A naked short call's max loss is Infinity. Summing it would make the
+    // whole ticker Infinity, so it is tracked as a flag and the finite legs
+    // still add up — the flag is what tells the reader the total is a floor.
+    const bounded = Number.isFinite(metrics.maxLoss);
+
     const prev = byTicker.get(trade.ticker);
     if (prev) {
       prev.delta += delta;
       prev.legs += 1;
+      if (bounded) prev.risk += Math.abs(metrics.maxLoss);
+      else prev.undefinedRisk = true;
     } else {
-      byTicker.set(trade.ticker, { delta, beta: trade.beta ?? 1, legs: 1 });
+      byTicker.set(trade.ticker, {
+        delta,
+        beta: trade.beta ?? 1,
+        legs: 1,
+        spot,
+        risk: bounded ? Math.abs(metrics.maxLoss) : 0,
+        undefinedRisk: !bounded,
+      });
     }
-  }
-
-  const spots = new Map<string, number>();
-  for (const { trade } of positions) {
-    const spot = trade.underlying_price ?? 0;
-    if (spot > 0) spots.set(trade.ticker, spot);
   }
 
   const out: TickerExposure[] = [];
   for (const [ticker, agg] of byTicker) {
-    const spot = spots.get(ticker) ?? 0;
-    const exposure = agg.delta * spot;
+    const notional = agg.delta * agg.spot;
     out.push({
       ticker,
       shareDelta: agg.delta,
-      exposure,
-      pctOfNav: netLiq > 0 ? (exposure / netLiq) * 100 : 0,
+      notional,
+      pctOfNav: netLiq > 0 ? (notional / netLiq) * 100 : 0,
+      capitalAtRisk: agg.risk,
+      undefinedRisk: agg.undefinedRisk,
       beta: agg.beta,
-      betaWeighted: exposure * agg.beta,
+      betaWeighted: notional * agg.beta,
       legs: agg.legs,
     });
   }
-  return out.sort((a, b) => Math.abs(b.exposure) - Math.abs(a.exposure));
+  // Ranked by money at stake, not by notional — that is the order the reader
+  // needs when deciding what to trim.
+  return out.sort((a, b) => b.capitalAtRisk - a.capitalAtRisk);
 }
 
-export interface Leverage {
-  /** Sum of |exposure| across underlyings. */
-  grossExposure: number;
-  /** Signed sum — what a broad market move actually moves. */
-  netExposure: number;
-  /** grossExposure / net liquidity. 1.0x means fully invested, no leverage. */
+export interface NotionalExposure {
+  /** Sum of |notional| across underlyings. */
   gross: number;
+  /** Signed sum — what a broad move in every name actually moves. */
   net: number;
-  /** Net exposure restated in index-equivalent dollars, over net liquidity. */
+  /** Net notional restated in index-equivalent dollars. */
   betaWeighted: number;
-  betaWeightedExposure: number;
+  /** Each of the above over net liquidity, as a multiple. */
+  grossOfNav: number;
+  netOfNav: number;
+  betaWeightedOfNav: number;
 }
 
-export function leverage(exposures: TickerExposure[], netLiq: number): Leverage {
-  const grossExposure = exposures.reduce((a, e) => a + Math.abs(e.exposure), 0);
-  const netExposure = exposures.reduce((a, e) => a + e.exposure, 0);
-  const betaWeightedExposure = exposures.reduce((a, e) => a + e.betaWeighted, 0);
+/**
+ * Delta notional for the book. Explicitly not named leverage — see the note at
+ * the top of this section.
+ */
+export function notionalExposure(
+  exposures: TickerExposure[],
+  netLiq: number,
+): NotionalExposure {
+  const gross = exposures.reduce((a, e) => a + Math.abs(e.notional), 0);
+  const net = exposures.reduce((a, e) => a + e.notional, 0);
+  const betaWeighted = exposures.reduce((a, e) => a + e.betaWeighted, 0);
   const safe = netLiq > 0 ? netLiq : NaN;
   return {
-    grossExposure,
-    netExposure,
-    betaWeightedExposure,
-    gross: grossExposure / safe,
-    net: netExposure / safe,
-    betaWeighted: betaWeightedExposure / safe,
+    gross,
+    net,
+    betaWeighted,
+    grossOfNav: gross / safe,
+    netOfNav: net / safe,
+    betaWeightedOfNav: betaWeighted / safe,
   };
 }
 
 export interface Concentration {
   /**
-   * Herfindahl-Hirschman index over each underlying's share of gross exposure,
-   * on 0-1. One position is 1.0; ten equal positions is 0.1.
+   * Herfindahl-Hirschman index over each underlying's share of capital at
+   * risk, on 0-1. One position is 1.0; ten equal positions is 0.1.
    */
   hhi: number;
   /**
    * 1 / HHI — how many equally-sized positions the book is *effectively*
-   * spread across. Far more legible than the index itself: a book of eight
-   * names where two carry 70% has an effective count near 3, and that number
-   * says something a raw 0.34 does not.
+   * spread across. Far more legible than the index itself: a book of seven
+   * names where one carries 30% has an effective count of 5, and that number
+   * says something a raw 0.20 does not.
    */
   effectiveNames: number;
-  /** Distinct underlyings actually carrying exposure. */
+  /** Distinct underlyings carrying capital at risk. */
   names: number;
   topTicker: string | null;
-  /** The largest single name's share of gross exposure, as a %. */
+  /** The largest single name's share of capital at risk, as a %. */
   topPct: number;
 }
 
-const EMPTY_CONCENTRATION: Concentration = {
-  hhi: 0,
-  effectiveNames: 0,
-  names: 0,
-  topTicker: null,
-  topPct: 0,
-};
-
 /**
- * Concentration over *gross* exposure shares.
+ * Concentration, measured over capital at risk.
  *
- * Gross rather than net because concentration is a question about how much of
- * the book rides on one name being right, and a long LEAP hedged by a short
- * call is still all one bet. Netting first would report a hedged, concentrated
- * book as diversified.
+ * The index itself comes from portfolio.ts rather than being recomputed here,
+ * so the report and the Dashboard cannot drift apart on what HHI means. This
+ * adds only the two figures the Dashboard doesn't surface: the reciprocal and
+ * the leader's share.
+ *
+ * Capital at risk rather than delta notional, deliberately. Concentration is a
+ * question about how much of the account one name can take down, and what a
+ * name can take down is the money staked on it — a $930 call carrying $2,200
+ * of notional can still only lose $930.
  */
-export function concentration(exposures: TickerExposure[]): Concentration {
-  const gross = exposures.reduce((a, e) => a + Math.abs(e.exposure), 0);
-  if (gross <= 0) return EMPTY_CONCENTRATION;
+export function concentration(
+  positions: Position[],
+  portValue: number,
+): Concentration {
+  const index = hhi(positions);
+  const top = largestTickerRisk(positions, portValue);
 
-  let hhi = 0;
-  let top: TickerExposure | null = null;
-  for (const e of exposures) {
-    const share = Math.abs(e.exposure) / gross;
-    hhi += share * share;
-    if (!top || Math.abs(e.exposure) > Math.abs(top.exposure)) top = e;
-  }
+  const names = new Set(
+    positions
+      .filter((p) => Number.isFinite(p.metrics.maxLoss) && p.metrics.maxLoss > 0)
+      .map((p) => p.trade.ticker),
+  ).size;
+
+  const grossRisk = positions.reduce(
+    (a, p) => (Number.isFinite(p.metrics.maxLoss) ? a + Math.abs(p.metrics.maxLoss) : a),
+    0,
+  );
 
   return {
-    hhi,
-    effectiveNames: hhi > 0 ? 1 / hhi : 0,
-    names: exposures.filter((e) => Math.abs(e.exposure) > 0).length,
+    hhi: index,
+    effectiveNames: index > 0 ? 1 / index : 0,
+    names,
     topTicker: top?.ticker ?? null,
-    topPct: top ? (Math.abs(top.exposure) / gross) * 100 : 0,
+    topPct: top && grossRisk > 0 ? (top.maxLoss / grossRisk) * 100 : 0,
   };
 }
 
