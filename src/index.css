@@ -162,3 +162,96 @@
     outline-offset: 1px;
   }
 }
+
+/* ============================================================================
+ * Report sheet — a letter-size page that prints 1:1.
+ *
+ * The sheet is sized in inches on screen, not just at print time. Two reasons:
+ * the preview is then literally what comes out of the printer, and ECharts
+ * measures its container once — if the sheet changed width inside the print
+ * dialog, every chart would render at the old size and clip. Nothing reflows,
+ * so nothing has to be re-measured.
+ *
+ * The app's dark tokens stop at the sheet boundary; inside it, ink on paper.
+ * ==========================================================================*/
+.report-sheet {
+  width: 8.5in;
+  padding: 0.5in;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #1f2933;
+  /* Without this, browsers drop background fills and lighten text when
+     printing, which strips the P&L color coding out of the PDF entirely. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* Section that must not be split across a page boundary. */
+.report-block {
+  break-inside: avoid;
+}
+
+/* Forces the next section onto a fresh page. */
+.report-page-break {
+  break-before: page;
+}
+
+@media print {
+  /* @page margin is zero because the sheet carries its own 0.5in padding —
+     doubling the two would shrink the content area to 7.5in and reflow it. */
+  @page {
+    size: letter portrait;
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* The shell is a viewport-height flex column with its own scroll container,
+     which otherwise prints as one clipped page no matter how long the report
+     is. Released by class rather than by a blanket `#root *` rule — that would
+     also override the inline heights ECharts sets on its own containers and
+     collapse every chart to nothing. */
+  .app-shell,
+  .app-shell-body,
+  .app-main {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  /* Chrome is removed from the layout entirely — sidebar, top bar, banner and
+     the report's own controls all carry .no-print.
+
+     The tempting alternative is `body * { visibility: hidden }` with the sheet
+     turned back on and lifted out of flow. It does not survive contact with
+     this shell: an out-of-flow sheet stops contributing to body's height, so
+     the page has nothing to paginate and prints blank. Keeping the sheet in
+     normal flow and deleting everything around it means the printed page is
+     laid out by the same box model as the preview. */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Tailwind's `ring-1` is a box-shadow, so clearing box-shadow drops both the
+     elevation and the hairline that frame the sheet on screen. */
+  .report-sheet {
+    margin: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* Repeat table headers when a long table crosses a page. */
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+  }
+}

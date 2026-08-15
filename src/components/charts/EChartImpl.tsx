@@ -18,11 +18,13 @@ import {
   VisualMapComponent,
 } from "echarts/components";
 import { LabelLayout } from "echarts/features";
-import { CanvasRenderer } from "echarts/renderers";
+import { CanvasRenderer, SVGRenderer } from "echarts/renderers";
 import { RISKDASH_THEME } from "./echartsTheme";
+import { REPORT_THEME, REPORT_THEME_NAME } from "./reportTheme";
 
 const THEME_NAME = "riskdash";
 echarts.registerTheme(THEME_NAME, RISKDASH_THEME);
+echarts.registerTheme(REPORT_THEME_NAME, REPORT_THEME);
 
 /**
  * Only the series and components actually used are registered, so the bundle
@@ -44,12 +46,15 @@ echarts.use([
   VisualMapComponent,
   LabelLayout,
   CanvasRenderer,
+  SVGRenderer,
 ]);
 
 interface Props {
   option: EChartsOption;
   height?: number;
   className?: string;
+  theme?: string;
+  renderer?: "canvas" | "svg";
 }
 
 /**
@@ -57,18 +62,32 @@ interface Props {
  * that wrapper is ~3 years stale and had malware published through a
  * compromised maintainer account in May 2026 (versions 3.1.7 / 3.2.7).
  */
-export default function EChartImpl({ option, height = 320, className }: Props) {
+export default function EChartImpl({
+  option,
+  height = 320,
+  className,
+  theme = THEME_NAME,
+  renderer = "canvas",
+}: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
 
-  // Create once, dispose on unmount. Kept separate from the option effect so
-  // re-rendering with new data never tears down the canvas.
+  // Read by the init effect without making `option` one of its dependencies —
+  // a fresh instance has to be given the current option immediately, but new
+  // data must never tear the chart down and rebuild it.
+  const optionRef = useRef(option);
+  optionRef.current = option;
+
+  // Created once per (theme, renderer). Both are init-time only in ECharts —
+  // neither can be changed on a live instance — so a change to either has to
+  // rebuild the chart rather than being silently ignored.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    const chart = echarts.init(host, THEME_NAME, { renderer: "canvas" });
+    const chart = echarts.init(host, theme, { renderer });
     chartRef.current = chart;
+    chart.setOption(optionRef.current, { notMerge: true });
 
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(host);
@@ -78,7 +97,7 @@ export default function EChartImpl({ option, height = 320, className }: Props) {
       chart.dispose();
       chartRef.current = null;
     };
-  }, []);
+  }, [theme, renderer]);
 
   useEffect(() => {
     const chart = chartRef.current;
