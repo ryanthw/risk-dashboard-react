@@ -187,16 +187,18 @@ export function OpenPositionsTable({ positions }: { positions: Position[] }) {
 
 // ---------------------------------------------------------------------------
 
-/** Net exposure per underlying, with the beta restatement beside it. */
-export function ExposureTable({
-  exposures,
-  netLiq,
-}: {
-  exposures: TickerExposure[];
-  netLiq: number;
-}) {
-  const grossTotal = exposures.reduce((a, e) => a + Math.abs(e.exposure), 0);
+/**
+ * Per-underlying risk, capital at stake first and notional second.
+ *
+ * Column order is the argument: what can be lost is the number that binds in a
+ * cash account, and delta notional sits beside it as context for how the book
+ * moves — not as a competing measure of size.
+ */
+export function ExposureTable({ exposures }: { exposures: TickerExposure[] }) {
+  const riskTotal = exposures.reduce((a, e) => a + e.capitalAtRisk, 0);
+  const notionalTotal = exposures.reduce((a, e) => a + Math.abs(e.notional), 0);
   const betaTotal = exposures.reduce((a, e) => a + e.betaWeighted, 0);
+  const anyUndefined = exposures.some((e) => e.undefinedRisk);
 
   return (
     <table className="w-full border-collapse">
@@ -204,11 +206,12 @@ export function ExposureTable({
         <tr>
           <Th>Ticker</Th>
           <Th right>Legs</Th>
+          <Th right>At Risk</Th>
+          <Th right>% of Risk</Th>
           <Th right>Share Delta</Th>
-          <Th right>Exposure</Th>
-          <Th right>% of NAV</Th>
+          <Th right>Notional</Th>
           <Th right>Beta</Th>
-          <Th right>Beta-Weighted</Th>
+          <Th right>SPY-Equiv.</Th>
         </tr>
       </thead>
       <tbody>
@@ -216,11 +219,15 @@ export function ExposureTable({
           <tr key={e.ticker}>
             <Td className="font-semibold tnum">{e.ticker}</Td>
             <Td right>{e.legs}</Td>
-            <Td right>{fmtNum(e.shareDelta, 0)}</Td>
-            <Td right className={pnlInk(e.exposure)}>
-              {fmtUsd(e.exposure)}
+            <Td right>
+              {fmtUsd(e.capitalAtRisk)}
+              {e.undefinedRisk && <span className="font-semibold text-[#c24326]">+</span>}
             </Td>
-            <Td right>{fmtPct(e.pctOfNav, 1)}</Td>
+            <Td right>{riskTotal > 0 ? fmtPct((e.capitalAtRisk / riskTotal) * 100, 1) : "—"}</Td>
+            <Td right>{fmtNum(e.shareDelta, 0)}</Td>
+            <Td right className={pnlInk(e.notional)}>
+              {fmtUsd(e.notional)}
+            </Td>
             <Td right>{fmtNum(e.beta, 2)}</Td>
             <Td right>{fmtUsd(e.betaWeighted)}</Td>
           </tr>
@@ -229,16 +236,22 @@ export function ExposureTable({
       <tfoot>
         <tr>
           <td
-            colSpan={3}
+            colSpan={2}
             className="pt-1.5 text-right text-[10px] font-semibold uppercase tracking-[0.08em] text-[#5a6675]"
           >
-            Gross / beta-weighted
+            Total
           </td>
           <td className="pt-1.5 text-right text-[11px] font-semibold tnum text-[#1f2933]">
-            {fmtUsd(grossTotal)}
+            {fmtUsd(riskTotal)}
           </td>
+          {/* Left blank rather than totalling to a meaningless 100%. The
+              account-level ratio this column invites — risk over portfolio
+              value — is the leverage figure, and it is already in the section
+              heading and the KPI tile. */}
+          <td />
+          <td />
           <td className="pt-1.5 text-right text-[11px] font-semibold tnum text-[#1f2933]">
-            {netLiq > 0 ? fmtPct((grossTotal / netLiq) * 100, 0) : "—"}
+            {fmtUsd(notionalTotal)}
           </td>
           <td />
           <td className="pt-1.5 text-right text-[11px] font-semibold tnum text-[#1f2933]">
@@ -246,6 +259,12 @@ export function ExposureTable({
           </td>
         </tr>
       </tfoot>
+      {anyUndefined && (
+        <caption className="caption-bottom pt-1.5 text-left text-[9.5px] text-[#c24326]">
+          + this ticker carries a leg with unbounded loss, so its at-risk figure is a
+          floor rather than a total.
+        </caption>
+      )}
     </table>
   );
 }

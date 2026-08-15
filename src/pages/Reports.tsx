@@ -25,14 +25,20 @@ import { useHistoryTrades, useSnapshots } from "@/api/history";
 import { useCashFlows } from "@/api/cashFlows";
 import { computeTwr, riskAdjusted, MIN_SNAPSHOTS_FOR_SHARPE } from "@/engine/twr";
 import { trackRecord, trackRecordByStrategy } from "@/engine/trackRecord";
-import { netLiquidity } from "@/engine/portfolio";
+import {
+  grossExposure,
+  leverageRatio,
+  netLiquidity,
+  portfolioValue,
+} from "@/engine/portfolio";
+import { undefinedRiskCount } from "@/engine/portfolioRisk";
 import {
   PERIOD_KEYS,
   PERIOD_LABELS,
   concentration,
   exposureByTicker,
-  leverage,
   monthlyRealized,
+  notionalExposure,
   resolvePeriod,
   snapshotsInPeriod,
   tradesInPeriod,
@@ -93,12 +99,20 @@ export default function Reports() {
   const months = useMemo(() => monthlyRealized(windowTrades), [windowTrades]);
 
   const netLiq = useMemo(() => netLiquidity(positions, cash), [positions, cash]);
+  const portValue = useMemo(() => portfolioValue(positions, cash), [positions, cash]);
   const exposures = useMemo(
     () => exposureByTicker(positions, netLiq),
     [positions, netLiq],
   );
-  const lev = useMemo(() => leverage(exposures, netLiq), [exposures, netLiq]);
-  const conc = useMemo(() => concentration(exposures), [exposures]);
+  const notional = useMemo(() => notionalExposure(exposures, netLiq), [exposures, netLiq]);
+  const conc = useMemo(() => concentration(positions, portValue), [positions, portValue]);
+
+  // The account's actual leverage: money that can be lost over portfolio value.
+  // Bounded at 1.0x without margin, so a reading above it means either a naked
+  // short leg or a real borrow — both worth seeing immediately.
+  const lev = useMemo(() => leverageRatio(positions, cash), [positions, cash]);
+  const atRisk = useMemo(() => grossExposure(positions), [positions]);
+  const undefinedRisk = useMemo(() => undefinedRiskCount(positions), [positions]);
 
   if (!portfolioId) return <NoPortfolio />;
   if (isLoading || loadingSnaps || loadingClosed)
@@ -166,31 +180,37 @@ export default function Reports() {
       tone: risk ? toneOf(risk.sharpe) : "neutral",
     },
     {
-      label: "Gross Leverage",
-      value: Number.isFinite(lev.gross) ? fmtMultiple(lev.gross, 2) : "—",
-      hint: `${fmtUsd(lev.grossExposure)} gross exposure`,
-      // Above 1x the book controls more underlying than it holds capital.
-      tone: lev.gross > 1 ? "loss" : "neutral",
+      label: "Leverage",
+      value: Number.isFinite(lev) ? fmtMultiple(lev, 2) : "—",
+      hint: undefinedRisk
+        ? `${fmtUsd(atRisk)} at risk, excl. ${undefinedRisk} undefined-risk`
+        : `${fmtUsd(atRisk)} at risk · 1.00x is fully deployed`,
+      // Without margin this cannot exceed 1.0x, so a reading above it is a
+      // finding rather than a scale point.
+      tone: undefinedRisk ? "loss" : lev > 1 ? "loss" : "neutral",
     },
     {
-      label: "Beta-Weighted",
-      value: Number.isFinite(lev.betaWeighted) ? fmtMultiple(lev.betaWeighted, 2) : "—",
-      hint: `${fmtUsd(lev.betaWeightedExposure)} index-equivalent`,
-      tone: Math.abs(lev.betaWeighted) > 1.5 ? "loss" : "neutral",
+      label: "Delta Notional",
+      value: fmtUsd(notional.gross),
+      hint: Number.isFinite(notional.grossOfNav)
+        ? `${fmtMultiple(notional.grossOfNav, 2)} NAV — underlying the book tracks`
+        : undefined,
+    },
+    {
+      label: "SPY-Equivalent",
+      value: fmtUsd(notional.betaWeighted),
+      hint: Number.isFinite(notional.betaWeightedOfNav)
+        ? `${fmtMultiple(notional.betaWeightedOfNav, 2)} NAV, beta-weighted`
+        : undefined,
     },
     {
       label: "Concentration",
       value: conc.names ? fmtNum(conc.hhi, 2) : "—",
       hint: conc.names
-        ? `HHI · ${fmtNum(conc.effectiveNames, 1)} effective names of ${conc.names}`
-        : "no exposure",
+        ? `${fmtNum(conc.effectiveNames, 1)} effective names of ${conc.names}` +
+          (conc.topTicker ? ` · ${conc.topTicker} ${fmtPct(conc.topPct, 0)}` : "")
+        : "no capital at risk",
       tone: conc.hhi > 0.25 ? "loss" : "neutral",
-    },
-    {
-      label: "Largest Name",
-      value: conc.topTicker ?? "—",
-      hint: conc.topTicker ? `${fmtPct(conc.topPct, 0)} of gross exposure` : undefined,
-      tone: conc.topPct > 40 ? "loss" : "neutral",
     },
   ];
 
@@ -297,18 +317,23 @@ export default function Reports() {
         )}
 
         <ReportSection
-          title="Exposure & Concentration"
-          hint={`${fmtMultiple(lev.gross, 2)} gross · ${fmtMultiple(lev.betaWeighted, 2)} beta-weighted`}
+          title="Risk & Concentration"
+          hint={`${fmtMultiple(lev, 2)} leverage · ${fmtMultiple(notional.grossOfNav, 2)} notional`}
         >
           {exposures.length > 0 ? (
             <>
-              <ExposureTable exposures={exposures} netLiq={netLiq} />
+              <ExposureTable exposures={exposures} />
               <ReportFootnote>
-                Exposure is Black-Scholes delta times spot, netted across every leg on a
-                ticker. Beta is the value stored on each position and is unreliable for
-                thinly-traded names — treat the beta-weighted column as an order of
-                magnitude, not a measurement. HHI runs 0 to 1 over gross exposure shares;
-                its reciprocal is the effective number of positions.
+                <strong>At risk</strong> is the money that can actually be lost — each
+                leg's maximum loss, summed per ticker — and it is what leverage and HHI
+                are measured over. Without margin it cannot exceed the account, so
+                leverage is bounded at 1.00x.{" "}
+                <strong>Notional</strong> is Black-Scholes delta times spot, netted
+                across a ticker's legs: how much underlying the book moves with, which
+                for in-the-money long calls is several times what they cost. It is not
+                borrowing and nothing beyond the premium is at stake. Beta is the value
+                stored on each position and is unreliable for thinly-traded names — read
+                the SPY-equivalent column as an order of magnitude, not a measurement.
               </ReportFootnote>
             </>
           ) : (
