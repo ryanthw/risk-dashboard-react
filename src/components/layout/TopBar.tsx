@@ -20,6 +20,7 @@ const TITLES: Record<string, string> = {
   "/income-scanner": "Income Scanner",
   "/basis": "Basis Tracker",
   "/iv-surface": "IV Surface",
+  "/reports": "Reports",
 };
 
 export function TopBar() {
@@ -31,7 +32,7 @@ export function TopBar() {
   const { refresh, refreshing } = useRefreshMarketData(active, trades ?? []);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur">
+    <header className="no-print sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur">
       <div className="flex min-w-0 items-center gap-3">
         <h1 className="truncate text-lg font-semibold tracking-tight">
           {TITLES[pathname] ?? "Dashboard"}

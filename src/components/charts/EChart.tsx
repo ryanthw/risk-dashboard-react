@@ -7,6 +7,13 @@ interface EChartProps {
   option: EChartsOption;
   height?: number;
   className?: string;
+  /** Registered theme name. Defaults to the app's dark theme. */
+  theme?: string;
+  /**
+   * "svg" for anything that will be printed — a canvas chart rasterizes into
+   * the PDF at screen resolution, while SVG stays vector and stays sharp.
+   */
+  renderer?: "canvas" | "svg";
 }
 
 function ChartSkeleton({ height = 320 }: { height?: number }) {

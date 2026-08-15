@@ -8,6 +8,7 @@ import {
   FlaskConical,
   Radar,
   Banknote,
+  FileText,
   Layers,
   LogOut,
   TrendingUp,
@@ -29,6 +30,7 @@ const nav = [
   { to: "/income-scanner", label: "Income Scanner", icon: Banknote },
   { to: "/basis", label: "Basis Tracker", icon: Layers },
   { to: "/iv-surface", label: "IV Surface", icon: Waves },
+  { to: "/reports", label: "Reports", icon: FileText },
 ];
 
 export function Sidebar() {
@@ -36,7 +38,7 @@ export function Sidebar() {
   const [accountOpen, setAccountOpen] = useState(false);
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-border bg-card/40">
+    <aside className="no-print flex h-full w-64 flex-col border-r border-border bg-card/40">
       <div className="flex items-center gap-2.5 px-5 py-5">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
           <TrendingUp className="h-5 w-5 text-primary" />
