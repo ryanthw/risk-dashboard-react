@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { TRADE_TYPES, TRADE_TYPE_LABELS, isSpread, type TradeType } from "@/types";
 import { fetchQuote } from "@/api/marketData";
+import { todayInput } from "@/lib/dates";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { toast } from "@/components/ui/toast";
 
@@ -26,6 +27,8 @@ export interface TradeDraft {
   cost_basis: number; // per-share entry price (shares only)
   iv: number;
   expiration: string; // ISO date
+  /** Local calendar date the position was opened. */
+  opened_at: string;
   underlying_price: number | null;
   sector: string;
   beta: number;
@@ -44,6 +47,7 @@ export function emptyDraft(): TradeDraft {
     cost_basis: 0,
     iv: 0.3,
     expiration: exp.toISOString().slice(0, 10),
+    opened_at: todayInput(),
     underlying_price: null,
     sector: "Unknown",
     beta: 1.0,
@@ -73,10 +77,13 @@ export function TradeFields({
   draft,
   onChange,
   lockType = false,
+  showOpenedAt = false,
 }: {
   draft: TradeDraft;
   onChange: (d: TradeDraft) => void;
   lockType?: boolean;
+  /** Off in the Trade Analysis sandbox, where "execute" always means now. */
+  showOpenedAt?: boolean;
 }) {
   const [fetching, setFetching] = useState(false);
   const set = (patch: Partial<TradeDraft>) => onChange({ ...draft, ...patch });
@@ -198,16 +205,29 @@ export function TradeFields({
         )}
       </div>
 
-      {draft.trade_type !== "shares" && (
-        <div className="space-y-1.5">
-          <Label>Expiration</Label>
-          <Input
-            type="date"
-            value={draft.expiration}
-            onChange={(e) => set({ expiration: e.target.value })}
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-3">
+        {draft.trade_type !== "shares" && (
+          <div className="space-y-1.5">
+            <Label>Expiration</Label>
+            <Input
+              type="date"
+              value={draft.expiration}
+              onChange={(e) => set({ expiration: e.target.value })}
+            />
+          </div>
+        )}
+        {showOpenedAt && (
+          <div className="space-y-1.5">
+            <Label>Opened</Label>
+            <Input
+              type="date"
+              value={draft.opened_at}
+              max={todayInput()}
+              onChange={(e) => set({ opened_at: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
