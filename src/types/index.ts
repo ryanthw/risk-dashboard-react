@@ -84,6 +84,8 @@ export interface TradeInput {
   cost_basis?: number | null;
   sector?: string;
   beta?: number;
+  /** When the position was opened. Omitted means now (the column default). */
+  opened_at?: string;
 }
 
 export interface Portfolio {

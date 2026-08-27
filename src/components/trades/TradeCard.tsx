@@ -70,8 +70,16 @@ export function TradeCard({ position }: { position: Position }) {
 
   const handleDelete = async () => {
     try {
-      await del.mutateAsync({ id: trade.id, portfolioId: trade.portfolio_id });
-      toast.success(`Removed ${trade.ticker}`);
+      const reversed = await del.mutateAsync({
+        id: trade.id,
+        portfolioId: trade.portfolio_id,
+      });
+      toast.success(
+        `Removed ${trade.ticker}`,
+        reversed === 0
+          ? undefined
+          : `Cash ${-reversed > 0 ? "+" : ""}${fmtUsd(-reversed)} backed out`,
+      );
       setCloseOpen(false);
     } catch (e) {
       toast.error("Delete failed", String((e as Error).message));
@@ -262,6 +270,10 @@ export function TradeCard({ position }: { position: Position }) {
             >
               Hard Delete (no history)
             </Button>
+            <p className="mt-1.5 text-[0.7rem] text-muted-foreground">
+              For a position that was never real: the opening cash comes back out
+              and it leaves no trace in any figure.
+            </p>
           </PopoverContent>
         </Popover>
       </div>

@@ -14,6 +14,7 @@ import { TradeFields, emptyDraft, type TradeDraft } from "./TradeFields";
 import { useUpsertTrade } from "@/api/trades";
 import { fetchQuote } from "@/api/marketData";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { withDate } from "@/lib/dates";
 import { isSpread, type TradeInput } from "@/types";
 
 function draftToInput(draft: TradeDraft, portfolioId: string): TradeInput {
@@ -35,6 +36,10 @@ function draftToInput(draft: TradeDraft, portfolioId: string): TradeInput {
     underlying_price: draft.underlying_price,
     sector: draft.sector,
     beta: draft.beta,
+    // Carries the current clock time onto the chosen day, so a position entered
+    // today is stamped now and a backdated one still sorts sensibly against
+    // whatever else was opened that day.
+    opened_at: withDate(new Date().toISOString(), draft.opened_at),
   };
 }
 
@@ -110,7 +115,7 @@ export function AddTradeDialog({
             sector and beta.
           </DialogDescription>
         </DialogHeader>
-        <TradeFields draft={draft} onChange={setDraft} />
+        <TradeFields draft={draft} onChange={setDraft} showOpenedAt />
         <Button
           onClick={handleSave}
           disabled={upsert.isPending || saving}
