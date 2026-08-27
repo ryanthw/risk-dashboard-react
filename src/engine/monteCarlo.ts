@@ -4,6 +4,7 @@
  * pop, expected_profit, var_95, cvar_95, kelly_criterion).
  */
 import type { TradeType } from "@/types";
+import { isCreditSpread, spreadLegs } from "./spread";
 
 export interface Payoffable {
   trade_type: TradeType;
@@ -69,7 +70,6 @@ export function payoffAtPrices(
 ): Float64Array {
   const S0 = trade.underlying_price ?? 0;
   const K1 = trade.strike ?? 0;
-  const K2 = trade.strike_2 ?? 0;
   const qty = trade.qty;
   const premium = trade.premium ?? 0;
   const mult = 100 * qty;
@@ -78,6 +78,16 @@ export function payoffAtPrices(
   const out = new Float64Array(n);
 
   const max = Math.max;
+
+  // Spread terms depend on the trade, not on the simulated price, so they are
+  // resolved once rather than 50,000 times.
+  const legs = spreadLegs(t, trade.strike, trade.strike_2);
+  const spreadIsCall = legs?.kind === "call";
+  const longK = legs?.long ?? null;
+  const shortK = legs?.short ?? null;
+  // Direction comes from the structure; the sign typed into the premium field
+  // is discarded, as it is everywhere else cash is derived from a trade.
+  const spreadNet = (isCreditSpread(t) ? 1 : -1) * Math.abs(premium) * mult;
 
   for (let i = 0; i < n; i++) {
     const s = ST[i];
@@ -96,28 +106,22 @@ export function payoffAtPrices(
       case "csp":
         p = -max(K1 - s, 0) * mult + premium * mult;
         break;
-      case "pcs": {
-        const shortPnl = -max(K1 - s, 0) * mult;
-        const longPnl = K2 ? max(K2 - s, 0) * mult : 0;
-        p = shortPnl + longPnl + premium * mult;
-        break;
-      }
-      case "ccs": {
-        const shortPnl = -max(s - K1, 0) * mult;
-        const longPnl = K2 ? max(s - K2, 0) * mult : 0;
-        p = shortPnl + longPnl + premium * mult;
-        break;
-      }
-      case "cds": {
-        const longPnl = max(s - K1, 0) * mult;
-        const shortPnl = K2 ? -max(s - K2, 0) * mult : 0;
-        p = longPnl + shortPnl - Math.abs(premium) * mult;
-        break;
-      }
+      // All four spreads share one payoff: long leg less short leg, plus the
+      // credit taken in or minus the debit paid. Which strike plays which role
+      // comes from spreadLegs, not from the column it was entered in.
+      case "pcs":
+      case "ccs":
+      case "cds":
       case "pds": {
-        const longPnl = max(K1 - s, 0) * mult;
-        const shortPnl = K2 ? -max(K2 - s, 0) * mult : 0;
-        p = longPnl + shortPnl - Math.abs(premium) * mult;
+        const longPnl =
+          longK == null
+            ? 0
+            : (spreadIsCall ? max(s - longK, 0) : max(longK - s, 0)) * mult;
+        const shortPnl =
+          shortK == null
+            ? 0
+            : -(spreadIsCall ? max(s - shortK, 0) : max(shortK - s, 0)) * mult;
+        p = longPnl + shortPnl + spreadNet;
         break;
       }
       case "cc":

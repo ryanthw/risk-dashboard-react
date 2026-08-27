@@ -3,9 +3,10 @@
  * deriveTradeMetrics already produces. Nothing here re-runs a simulation — it
  * reuses the existing pnlDist/greeks bundles, so it is cheap to recompute.
  */
-import type { Trade } from "@/types";
+import { isSpread, type Trade } from "@/types";
 import type { Position } from "./portfolio";
 import { simulatePayoff, var95, cvar95 } from "./monteCarlo";
+import { isCreditSpread, spreadLegs } from "./spread";
 
 /** Must match deriveTradeMetrics' default so summed distributions line up. */
 const SIMS = 50_000;
@@ -100,7 +101,6 @@ export function expiryTailRisk(positions: Position[]): TailRisk | null {
 /** The strike that is actually short for a position, or null if it has none. */
 export function shortStrike(trade: Trade): { strike: number; kind: "put" | "call" } | null {
   const K1 = trade.strike ?? 0;
-  const K2 = trade.strike_2 ?? 0;
   switch (trade.trade_type) {
     case "csp":
     case "short_put":
@@ -108,15 +108,14 @@ export function shortStrike(trade: Trade): { strike: number; kind: "put" | "call
     case "cc":
     case "short_call":
       return { strike: K1, kind: "call" };
-    // For spreads the short leg is structural, not positional: the short put is
-    // always the higher strike and the short call always the lower one, so read
-    // it off the pair rather than trusting which column it landed in.
-    case "pcs":
-      return { strike: Math.max(K1, K2), kind: "put" };
-    case "ccs":
-      return { strike: Math.min(K1, K2), kind: "call" };
-    default:
-      return null;
+    default: {
+      // Every spread has a short leg, debit ones included — a call debit spread
+      // is short the higher call, a put debit spread the lower put. Which one
+      // is structural rather than positional, so it is read off the pair.
+      const legs = spreadLegs(trade.trade_type, trade.strike, trade.strike_2);
+      if (!legs || legs.short == null) return null;
+      return { strike: legs.short, kind: legs.kind };
+    }
   }
 }
 
@@ -126,6 +125,15 @@ export interface AssignmentRisk {
   kind: "put" | "call";
   /** How far in-the-money, as a % of the strike. */
   itmPct: number;
+  /**
+   * True when the ITM short leg is the *good* outcome: a debit spread pays its
+   * maximum precisely when its short leg finishes in the money. What is at
+   * stake there is early assignment, not loss — being assigned leaves stock to
+   * deal with while the long leg is still open, which a cash account cannot
+   * carry. Credit spreads and naked shorts are the opposite case: ITM means the
+   * position has moved against you.
+   */
+  atMaxProfit: boolean;
 }
 
 /** Short legs currently in-the-money — the positions that can be assigned. */
@@ -143,6 +151,9 @@ export function assignmentRisks(positions: Position[]): AssignmentRisk[] {
       strike: short.strike,
       kind: short.kind,
       itmPct: (Math.abs(S - short.strike) / short.strike) * 100,
+      atMaxProfit:
+        isSpread(position.trade.trade_type) &&
+        !isCreditSpread(position.trade.trade_type),
     });
   }
   return out.sort((a, b) => b.itmPct - a.itmPct);

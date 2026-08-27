@@ -15,6 +15,7 @@ import { useUpdateTrade } from "@/api/trades";
 import { openingCashFlow } from "@/engine/cashFlow";
 import { toDateInput, todayInput, withDate } from "@/lib/dates";
 import { fmtUsd } from "@/lib/format";
+import { spreadStrikeLabels } from "./TradeFields";
 import { isSpread, type Trade } from "@/types";
 
 export function EditTradeDialog({
@@ -28,6 +29,7 @@ export function EditTradeDialog({
 }) {
   const update = useUpdateTrade();
   const spread = isSpread(trade.trade_type);
+  const [strikeLabel, strike2Label] = spreadStrikeLabels(trade.trade_type);
 
   const [iv, setIv] = useState(trade.iv);
   const [qty, setQty] = useState(trade.qty);
@@ -104,12 +106,12 @@ export function EditTradeDialog({
                 <NumberInput value={premium} onChange={setPremium} step="any" />
               </div>
               <div className="space-y-1.5">
-                <Label>{spread ? "Strike (Short)" : "Strike"}</Label>
+                <Label>{spread ? strikeLabel : "Strike"}</Label>
                 <NumberInput value={strike} onChange={setStrike} step="any" />
               </div>
               {spread && (
                 <div className="space-y-1.5">
-                  <Label>Strike 2 (Long)</Label>
+                  <Label>{strike2Label}</Label>
                   <NumberInput value={strike2} onChange={setStrike2} step="any" />
                 </div>
               )}
