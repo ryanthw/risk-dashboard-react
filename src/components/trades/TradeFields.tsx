@@ -34,6 +34,29 @@ export interface TradeDraft {
   beta: number;
 }
 
+/**
+ * Labels for a spread's two strike fields.
+ *
+ * Descriptive only: the engine reads which leg is long or short off the strike
+ * pair (see engine/spread), so entering them in either order gives the same
+ * position. These say what the structure is rather than instructing where to
+ * type what.
+ */
+export function spreadStrikeLabels(t: TradeType): [string, string] {
+  switch (t) {
+    case "pcs":
+      return ["Strike (Short, higher)", "Strike 2 (Long, lower)"];
+    case "ccs":
+      return ["Strike (Short, lower)", "Strike 2 (Long, higher)"];
+    case "cds":
+      return ["Strike (Long, lower)", "Strike 2 (Short, higher)"];
+    case "pds":
+      return ["Strike (Long, higher)", "Strike 2 (Short, lower)"];
+    default:
+      return ["Strike", "Strike 2"];
+  }
+}
+
 export function emptyDraft(): TradeDraft {
   const exp = new Date();
   exp.setDate(exp.getDate() + 30);
@@ -88,6 +111,7 @@ export function TradeFields({
   const [fetching, setFetching] = useState(false);
   const set = (patch: Partial<TradeDraft>) => onChange({ ...draft, ...patch });
   const spread = isSpread(draft.trade_type);
+  const [strikeLabel, strike2Label] = spreadStrikeLabels(draft.trade_type);
 
   const handleFetch = async () => {
     if (!draft.ticker) return;
@@ -177,14 +201,14 @@ export function TradeFields({
         )}
         {draft.trade_type !== "shares" && (
           <NumField
-            label={spread ? "Strike (Short)" : "Strike"}
+            label={spread ? strikeLabel : "Strike"}
             value={draft.strike}
             onChange={(n) => set({ strike: n })}
           />
         )}
         {spread && (
           <NumField
-            label="Strike 2 (Long)"
+            label={strike2Label}
             value={draft.strike_2}
             onChange={(n) => set({ strike_2: n })}
           />

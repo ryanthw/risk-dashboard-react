@@ -102,6 +102,10 @@ export default function Dashboard() {
   // theta is a credit for short premium, so a positive value is the good case.
   const theta = stats?.greeks.theta ?? 0;
   const attention = (stats?.assignments.length ?? 0) + (stats?.expiring.length ?? 0);
+  // Whether anything in that group is a problem rather than a good outcome.
+  const adverse =
+    (stats?.assignments.some((a) => !a.atMaxProfit) ?? false) ||
+    (stats?.expiring.length ?? 0) > 0;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -229,13 +233,19 @@ export default function Dashboard() {
       {attention > 0 && stats && (
         <div>
           <SectionTitle>Needs Attention</SectionTitle>
-          <Card className="border-loss/30">
+          {/* Red border only when something here is actually going wrong: a
+              debit spread whose short leg is ITM is at max profit. */}
+          <Card className={adverse ? "border-loss/30" : undefined}>
             <CardContent className="space-y-2 pt-5">
               {stats.assignments.map((a) => (
                 <StatRow
                   key={`itm-${a.position.trade.id}`}
-                  tone="loss"
-                  label={`${a.position.trade.ticker} short ${a.kind} ${fmtUsd(a.strike)} is ITM`}
+                  tone={a.atMaxProfit ? "gain" : "loss"}
+                  label={
+                    a.atMaxProfit
+                      ? `${a.position.trade.ticker} at max profit — short ${a.kind} ${fmtUsd(a.strike)} ITM; watch for early assignment`
+                      : `${a.position.trade.ticker} short ${a.kind} ${fmtUsd(a.strike)} is ITM`
+                  }
                   value={`${fmtPct(a.itmPct, 1)} in`}
                 />
               ))}

@@ -3,6 +3,7 @@
  * Ported 1:1 from trade.py (_bs_price, get_theoretical_value, greeks).
  */
 import type { TradeType } from "@/types";
+import { spreadLegs } from "./spread";
 
 export const RISK_FREE_RATE = 0.04;
 
@@ -76,7 +77,6 @@ export function theoreticalValue(
   const mult = 100 * trade.qty;
   const t = trade.trade_type;
   const K1 = trade.strike ?? 0;
-  const K2 = trade.strike_2 ?? 0;
 
   if (t === "shares") return S * trade.qty;
 
@@ -88,15 +88,13 @@ export function theoreticalValue(
     const v = bsPrice(S, K1, T, iv, r, "put") * mult;
     return t === "long_put" ? v : -v;
   }
-  if (t === "pcs" || t === "pds") {
-    const v1 = bsPrice(S, K1, T, iv, r, "put") * mult;
-    const v2 = bsPrice(S, K2, T, iv, r, "put") * mult;
-    return t === "pcs" ? -v1 + v2 : v1 - v2;
-  }
-  if (t === "ccs" || t === "cds") {
-    const v1 = bsPrice(S, K1, T, iv, r, "call") * mult;
-    const v2 = bsPrice(S, K2, T, iv, r, "call") * mult;
-    return t === "ccs" ? -v1 + v2 : v1 - v2;
+  const legs = spreadLegs(t, trade.strike, trade.strike_2);
+  if (legs) {
+    // Long leg less short leg. Which strike is which is read off the pair, so
+    // the value does not depend on the order the strikes were entered in.
+    const price = (K: number) => bsPrice(S, K, T, iv, r, legs.kind) * mult;
+    return (legs.long == null ? 0 : price(legs.long)) -
+      (legs.short == null ? 0 : price(legs.short));
   }
   if (t === "cc") {
     // The written call only; the covering shares/LEAPS are a separate position.
