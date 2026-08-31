@@ -1,9 +1,8 @@
 -- ============================================================================
 -- Earnings short-vol scanner — reference data
--- earnings_reliability: per-ticker historical iron-butterfly / straddle stats,
--- computed from the research backtest (real DoltHub option history + yfinance
--- realized moves, S&P 500, 2020-2025). Reference data shared by all users.
--- Regenerate/extend via research/scripts/butterfly.py -> ticker_reliability.json.
+-- earnings_reliability: per-ticker historical iron-butterfly / straddle stats.
+-- Reference data shared by all users, read-only to the app. Rows are produced
+-- and loaded externally; see the "Research boundary" section of the README.
 -- ============================================================================
 create table if not exists public.earnings_reliability (
   ticker            text primary key,
@@ -44,7 +43,7 @@ create policy "scan cache readable by authenticated"
   on public.earnings_scan_cache for select
   to authenticated using (true);
 
--- ---- seed (research backtest, 372 names) -------------------------------------
+-- ---- reference rows (loaded externally) ------------------------------------
 -- Seed rows for this table live in the private research repo
 -- (ryanthw/research-sandbox, db/seeds/). They are research output, and the
 -- research side is their only write path. This repo owns the schema and the

@@ -1,10 +1,9 @@
 -- ============================================================================
--- Earnings reliability — add iron-CONDOR stats (1104 names).
--- The scanner now offers a butterfly|condor structure toggle; the condor is the
--- smoother backtested structure (PF 2.4, positive every quarter). Columns
--- condor_n/condor_win/condor_mean_ror come from the same DoltHub backtest
--- (Δ16 short body / Δ5 wings). Idempotent — safe to re-run.
--- Regenerate via research/scripts/gen_reliability_migration.py.
+-- Earnings reliability — add iron-condor stat columns.
+-- The scanner offers a butterfly|condor structure toggle, so the reliability
+-- table carries condor_n / condor_win / condor_mean_ror alongside the butterfly
+-- columns. Values are loaded externally; this migration only adds the columns.
+-- Idempotent — safe to re-run.
 -- ============================================================================
 alter table public.earnings_reliability add column if not exists condor_n int;
 alter table public.earnings_reliability add column if not exists condor_win numeric;

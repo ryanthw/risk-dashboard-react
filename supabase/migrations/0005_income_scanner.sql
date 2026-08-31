@@ -4,8 +4,9 @@
 -- income_universe: a small, hand-curated list of liquid, low-priced optionable
 --   names the scanner sweeps. Kept deliberately tight (sub-$25-ish so the live
 --   "< $15 spot" filter has headroom) so a full scan stays fast and we land near
---   ~20 quality candidates after filtering. EDIT THIS LIST to tune coverage —
---   add/remove names or flip `active`. Sector strings should match Finnhub's
+--   ~20 quality candidates after filtering. Rows are loaded externally and the
+--   app only reads them; see the "Research boundary" section of the README.
+--   Sector strings should match Finnhub's
 --   `finnhubIndustry` values (what `market-data` stamps on portfolio trades) so
 --   the diversification rating lines up with your book.
 --

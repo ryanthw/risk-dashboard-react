@@ -1,5 +1,10 @@
 # Risk Dashboard — React Port: Architecture & Build Plan
 
+> Historical record. This is the original design document written before the
+> rewrite began, kept because it explains why the architecture looks the way it
+> does. It describes intent at the time, not necessarily the current state — the
+> README is the accurate description of what exists today.
+
 A ground-up React rewrite of the Streamlit options/stock risk dashboard
 (`Risk Dashboard Final/`). Goal: same (or improved) functionality, a
 professional-grade sleek dark UI, a brand-new Supabase backend, and free hosting.
@@ -223,9 +228,3 @@ Total recurring cost: **$0**.
 6. **Polish & deploy** — loading/error/empty states, toasts, responsive checks, README + Vercel/Supabase deploy docs.
 
 ---
-
-## 9. What I need from you (when ready)
-
-- New Supabase project **URL** + **anon key** (and access to add the `FINNHUB_API_KEY`
-  secret + run the migration — or I'll provide exact steps/SQL to paste).
-- Confirm Finnhub key to use (the existing free one is fine to start).
