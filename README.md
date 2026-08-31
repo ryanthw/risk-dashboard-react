@@ -11,6 +11,30 @@ scanner — all on a free Supabase + Vercel stack with per-account data isolatio
 
 ---
 
+## Research boundary
+
+Strategy research lives in a **separate private repo** and is not part of this one.
+The relationship is one-way:
+
+```
+  research (private)  --->  Supabase tables  --->  this dashboard
+                                                   READ ONLY
+```
+
+`earnings_reliability` and `income_universe` are populated only from the research
+side. This repo owns their schema and a `select`-only RLS policy, and contains no
+`insert`, `update`, `upsert`, or `delete` against either — the Earnings and Income
+scanners read them and nothing more. If you are changing the data layer, keep it
+that way; this check should return nothing:
+
+```sh
+grep -rnE '\.from\(\s*.(earnings_reliability|income_universe).\s*\)\s*\.\s*(insert|upsert|update|delete)' src supabase scripts
+```
+
+**Self-hosting:** the migrations create those two tables empty. Everything else
+works out of the box; the Earnings and Income scanners return nothing until you
+populate them with your own data.
+
 ## Tech Stack
 
 - **Vite + React 18 + TypeScript**
@@ -129,6 +153,18 @@ Netlify (same Vite static build).
   diagram with lognormal price-probability overlay, and portfolio-impact analysis.
 
 ---
+
+## Security notes
+
+- The Supabase **anon** key ships in the client bundle by design. Every table has
+  RLS enabled; user data is scoped to `auth.uid()`, and shared reference tables are
+  readable by `authenticated` only, never `anon`.
+- `FINNHUB_API_KEY`, `PUBLI_API_KEY` and `PUBLIC_ACCOUNT_ID` are Edge Function
+  secrets and never reach the client. `PUBLIC_ACCOUNT_ID` identifies a real
+  brokerage account — keep it configuration, never a literal.
+- The scheduled snapshot job runs from a private repo, because it authenticates as
+  a real account with an email and password. `npm run snapshot:local` is the local
+  equivalent for your own account.
 
 ## Notes / Future Work
 

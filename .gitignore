@@ -14,17 +14,12 @@ dist-ssr
 # Reference Streamlit app — not part of the React build
 Risk Dashboard Final/
 
-# Research: track the reproducible pipeline (scripts + report), ignore the heavy
-# data/artifacts (parquet caches, charts, logs, generated symbol lists).
-research/data/
-research/out/
-research/cds
-research/scripts
-research/smallcap
-
 # Supabase CLI local state (regenerated on link)
 supabase/.temp/
 
-# wheel live-testing secrets/logs
-research/smallcap_live_testing/.env
-research/smallcap_live_testing/orders/run.log
+# Secrets — never commit real credentials. Research lives in a separate private
+# repo; nothing under a research/ path belongs here any more.
+.env
+.env.*
+!.env.example
+research/

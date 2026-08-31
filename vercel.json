@@ -3,6 +3,5 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ':(exclude)research/'",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
