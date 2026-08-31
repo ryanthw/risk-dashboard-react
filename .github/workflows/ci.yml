@@ -19,6 +19,9 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npm run lint
+
+      # No lint step: this project has never had eslint installed or configured.
+      # typecheck and build are the checks that actually mean something here.
       - run: npm run typecheck
+      - run: npm run typecheck:scripts
       - run: npm run build

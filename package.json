@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "tsc -b && tsc -p tsconfig.scripts.json && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "snapshot": "tsx --tsconfig tsconfig.app.json scripts/snapshot.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
