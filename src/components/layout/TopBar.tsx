@@ -16,6 +16,7 @@ const TITLES: Record<string, string> = {
   "/strategy": "PM Strategy & Allocation",
   "/history": "Historical Analysis",
   "/analysis": "Trade Analysis Sandbox",
+  "/position-analysis": "Position Analysis",
   "/scanner": "Earnings Premium Scanner",
   "/income-scanner": "Income Scanner",
   "/basis": "Basis Tracker",

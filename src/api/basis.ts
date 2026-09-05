@@ -14,9 +14,14 @@ export interface ExpSummary {
 export interface ContractQuote {
   expiration: string;
   strike: number;
+  cp: "C" | "P";
   mid: number;
   delta: number;
   iv: number;
+  /** Null unless `source` is "public" — the DoltHub fallback has only EOD
+   *  greeks, which must not be read as live ones. */
+  theta: number | null;
+  vega: number | null;
 }
 export interface CcCandidate {
   expiration: string;
@@ -41,6 +46,8 @@ export interface VolSurface {
 export interface ContractRef {
   expiration: string;
   strike: number;
+  /** Omit for a call — the edge function defaults to "C". */
+  cp?: "C" | "P";
 }
 
 async function fetchVolSurface(
@@ -62,12 +69,15 @@ async function fetchVolSurface(
  */
 export function useVolSurface(ticker: string, contracts: ContractRef[] = []) {
   const key = contracts
-    .map((c) => `${c.expiration}:${c.strike}`)
+    .map((c) => `${c.expiration}:${c.strike}:${c.cp ?? "C"}`)
     .sort()
     .join(",");
   return useQuery({
     queryKey: ["vol-surface", ticker, key],
     queryFn: () => fetchVolSurface(ticker, contracts),
+    // The function rejects an empty ticker; callers that gate on a selection
+    // pass "" rather than conditionally calling the hook.
+    enabled: ticker.length > 0,
     staleTime: 15 * 60_000,
     retry: 1,
     refetchOnWindowFocus: false,

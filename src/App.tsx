@@ -10,6 +10,7 @@ const Visuals = lazy(() => import("@/pages/Visuals"));
 const Strategy = lazy(() => import("@/pages/Strategy"));
 const History = lazy(() => import("@/pages/History"));
 const TradeAnalysis = lazy(() => import("@/pages/TradeAnalysis"));
+const PositionAnalysis = lazy(() => import("@/pages/PositionAnalysis"));
 const IncomeScanner = lazy(() => import("@/pages/IncomeScanner"));
 const EarningsScanner = lazy(() => import("@/pages/EarningsScanner"));
 const BasisTracker = lazy(() => import("@/pages/BasisTracker"));
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/income-scanner" element={<IncomeScanner />} />
             <Route path="/history" element={<History />} />
             <Route path="/analysis" element={<TradeAnalysis />} />
+            <Route path="/position-analysis" element={<PositionAnalysis />} />
             <Route path="/scanner" element={<EarningsScanner />} />
             <Route path="/basis" element={<BasisTracker />} />
             <Route path="/iv-surface" element={<IvSurface />} />

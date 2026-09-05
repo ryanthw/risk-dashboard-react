@@ -6,11 +6,17 @@
 //      explicit expirationDate, so discovery has to come from elsewhere.)
 //   2. PRIMARY: pull each expiration's chain from the Public API (live greeks)
 //      and reduce it to ATM IV, 25Δ put/call IV and the expected move. Also
-//      returns live marks for any specific long-call contracts the caller
-//      holds, and the best-yielding ~25Δ covered-call candidate across the
-//      5-45 DTE window ("what would covering pay").
+//      returns live quotes for any specific contracts the caller holds — puts
+//      or calls, carrying iv/delta/theta/vega — and the best-yielding ~25Δ
+//      covered-call candidate across the 5-45 DTE window ("what would covering
+//      pay"). Position Analysis prices a whole ticker's book off those quotes;
+//      the Basis Tracker uses the same field for LEAPS marks.
 //   3. FALLBACK: if Public auth/data fails, the same reduction runs on the
 //      DoltHub post-no-preference/options chain (~15-min delayed EOD greeks).
+//      That fallback carries iv and delta but deliberately leaves theta/vega
+//      null: EOD greeks priced next to a live P&L figure would read as live
+//      when they are not. Callers that need them check `source === "public"`
+//      and otherwise fall back to their own model.
 //   4. Next earnings date via Finnhub. Payload cached per ticker for 15 min
 //      (vol_surface_cache) so tab visits don't hammer the APIs.
 //
@@ -62,6 +68,10 @@ type Row = {
   iv: number; // decimal
   delta: number; // signed
   mid: number;
+  /** Per share per day. Null when the source cannot supply a live greek. */
+  theta: number | null;
+  /** Per share per vol point. Null when the source cannot supply it. */
+  vega: number | null;
 };
 
 type ExpSummary = {
@@ -77,9 +87,14 @@ type ExpSummary = {
 type ContractQuote = {
   expiration: string;
   strike: number;
+  /** Defaults to "C" when the caller omits it, so existing callers that only
+   *  ever asked about long calls keep working unchanged. */
+  cp: "C" | "P";
   mid: number;
   delta: number;
   iv: number;
+  theta: number | null;
+  vega: number | null;
 };
 
 type CcCandidate = {
@@ -214,6 +229,8 @@ function publicRows(side: any[], cp: "C" | "P"): Row[] {
       iv: num(g.impliedVolatility),
       delta: num(g.delta),
       mid,
+      theta: num(g.theta),
+      vega: num(g.vega),
     });
   }
   return out.filter((r) => r.strike > 0);
@@ -273,6 +290,11 @@ async function doltChains(sym: string, exps: string[]): Promise<Map<string, Row[
       iv: num(r.vol),
       delta: num(r.delta),
       mid: ask > 0 ? (bid > 0 ? (bid + ask) / 2 : ask / 2) : 0,
+      // The table has theta/vega columns, but they are end-of-day. Serving
+      // them here would make a fallback quote indistinguishable from a live
+      // one downstream; null forces the caller onto its own model instead.
+      theta: null,
+      vega: null,
     };
     if (row.strike <= 0) continue;
     const arr = byExp.get(exp) ?? [];
@@ -322,14 +344,19 @@ Deno.serve(async (req) => {
     const ticker = String(body.ticker ?? "").toUpperCase();
     if (!ticker) return json({ error: "ticker required" }, 400);
     const force = !!body.force;
-    // Specific long-call contracts to quote: [{expiration, strike}]
-    const wanted: Array<{ expiration: string; strike: number }> = Array.isArray(body.contracts)
+    // Specific contracts to quote: [{expiration, strike, cp?}]. `cp` defaults
+    // to "C" so callers written when this only quoted long calls are unchanged.
+    type Wanted = { expiration: string; strike: number; cp: "C" | "P" };
+    const wanted: Wanted[] = Array.isArray(body.contracts)
       ? body.contracts
           .map((c: Record<string, unknown>) => ({
             expiration: String(c.expiration ?? "").slice(0, 10),
             strike: num(c.strike),
+            cp: String(c.cp ?? "C").toUpperCase().startsWith("P")
+              ? ("P" as const)
+              : ("C" as const),
           }))
-          .filter((c: { expiration: string; strike: number }) => c.expiration && c.strike > 0)
+          .filter((c: Wanted) => c.expiration && c.strike > 0)
       : [];
 
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -343,8 +370,27 @@ Deno.serve(async (req) => {
       if (cached && Date.now() - new Date(cached.created_at).getTime() < CACHE_TTL_MS) {
         const p = cached.payload as Payload;
         // Serve the cache only if it already covers every requested contract.
+        //
+        // The option type is part of "covers": a cached call at strike 100 is
+        // not an answer to a request for the put at strike 100, and matching
+        // on expiration+strike alone would hand back the wrong contract.
+        //
+        // A cached entry written before this function quoted greeks has no
+        // `theta` key at all, and serving it would leave every caller on the
+        // model for as long as the entry lives. Requiring the key to be
+        // *present* expires those on first read while still honouring a
+        // DoltHub-sourced entry, where theta is present and legitimately null
+        // — that one has to keep serving from cache, since a Public outage is
+        // exactly when re-pulling every request would hurt most.
+        const cachedQuotes = (p.contracts ?? []) as Array<Partial<ContractQuote>>;
         const covered = wanted.every((w) =>
-          p.contracts?.some((c) => c.expiration === w.expiration && c.strike === w.strike),
+          cachedQuotes.some(
+            (c) =>
+              c.expiration === w.expiration &&
+              c.strike === w.strike &&
+              (c.cp ?? "C") === w.cp &&
+              "theta" in c,
+          ),
         );
         if (covered) return json({ ...p, cached: true });
       }
@@ -397,14 +443,17 @@ Deno.serve(async (req) => {
     const contracts: ContractQuote[] = [];
     for (const w of wanted) {
       const rows = byExp.get(w.expiration);
-      const hit = rows?.find((r) => r.cp === "C" && Math.abs(r.strike - w.strike) < 0.005);
+      const hit = rows?.find((r) => r.cp === w.cp && Math.abs(r.strike - w.strike) < 0.005);
       if (hit) {
         contracts.push({
           expiration: w.expiration,
           strike: w.strike,
+          cp: w.cp,
           mid: +hit.mid.toFixed(2),
           delta: +hit.delta.toFixed(3),
           iv: +hit.iv.toFixed(4),
+          theta: hit.theta == null ? null : +hit.theta.toFixed(4),
+          vega: hit.vega == null ? null : +hit.vega.toFixed(4),
         });
       }
     }
