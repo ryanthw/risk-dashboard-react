@@ -4,6 +4,42 @@ import { EChart } from "@/components/charts/EChart";
 import { CHART_COLORS, CHART_SURFACE } from "@/components/charts/theme";
 import { X_NAME_GAP, axisUsd, tipUsd, valueAxis } from "@/components/charts/echartsTheme";
 
+/**
+ * Underlying price to the cent.
+ *
+ * tipUsd rounds to whole dollars, which is right for a P&L figure but throws
+ * away the resolution that matters most on the x-axis: on a $6 stock every
+ * strike and breakeven lands inside a single dollar, and the readout stops
+ * moving as the cursor crosses them.
+ */
+/**
+ * Tick labels for the price axis, at just enough precision to stay distinct.
+ *
+ * axisUsd rounds to whole dollars, which duplicates ticks as soon as the range
+ * slider tightens: a $26 stock at +/-5% spans $2.64, and seven whole-dollar
+ * ticks render as "$25 $26 $26 $27 $27 $28 $28". Precision is derived from the
+ * tick step ECharts will actually use, so labels stay as short as they can be
+ * without two of them reading the same.
+ */
+function priceTick(span: number): (v: number) => string {
+  const step = span / 7;
+  const digits = step >= 5 ? 0 : step >= 0.5 ? 1 : 2;
+  return (v: number) =>
+    `$${v.toLocaleString("en-US", {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })}`;
+}
+
+function spotUsd(v: number): string {
+  return v.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export interface PayoffChartProps {
   prices: number[];
   /** Aggregate P&L at the selected as-of date. */
@@ -64,7 +100,7 @@ export function PayoffChart({
         data: [`Payoff at ${asOfLabel}`, ...(today ? ["Value today"] : [])],
       },
       xAxis: {
-        ...valueAxis("Underlying Price ($)", axisUsd),
+        ...valueAxis("Underlying Price ($)", priceTick(prices[prices.length - 1] - prices[0])),
         nameGap: X_NAME_GAP,
         min: prices[0],
         max: prices[prices.length - 1],
@@ -105,7 +141,7 @@ export function PayoffChart({
           const now = arr.find((p) => p.seriesName === "Value today");
           const move = spot > 0 ? (at.value[0] / spot - 1) * 100 : 0;
           return (
-            `Underlying ${tipUsd(at.value[0])}` +
+            `Underlying ${spotUsd(at.value[0])}` +
             `<span style="color:${CHART_COLORS.muted}"> (${move >= 0 ? "+" : ""}${move.toFixed(1)}%)</span><br/>` +
             `${at.marker}${asOfLabel} <b>${tipUsd(at.value[1])}</b>` +
             (now ? `<br/>${now.marker}Today <b>${tipUsd(now.value[1])}</b>` : "")
@@ -158,7 +194,7 @@ export function PayoffChart({
                 xAxis: spot,
                 label: {
                   show: true,
-                  formatter: `Spot ${tipUsd(spot)}`,
+                  formatter: `Spot ${spotUsd(spot)}`,
                   position: "insideEndTop" as const,
                   color: CHART_COLORS.amber,
                   fontSize: 11,

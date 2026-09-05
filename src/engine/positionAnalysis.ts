@@ -249,22 +249,37 @@ export function asOfDates(book: TickerBook, now = Date.now()): AsOfDate[] {
   return out;
 }
 
+/** Slider stops for the visible spot range, as +/- fractions of spot. */
+export const RANGE_STOPS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4];
+
+/** Never open tighter than this: a payoff curve needs room to show its shape. */
+const MIN_DEFAULT_RANGE = 0.2;
+
 /**
- * Spot grid for the x-axis: wide enough to show every strike's kink with room
- * past it, and never narrower than +/-35% of spot so a near-the-money book
- * still shows its shape.
+ * Default visible range: the tightest stop that still shows every strike's
+ * kink, so a book whose strikes sit far from spot opens framed on its own
+ * structure rather than on an arbitrary window.
+ *
+ * Floored, because "fits the strikes" alone is the wrong target for an
+ * at-the-money position — a covered call written at spot needs no width at all
+ * by that rule and would open at +/-5%, too zoomed to read. The floor only
+ * ever widens the view; the slider still goes tighter on request.
  */
-export function priceGrid(book: TickerBook, points = 241): number[] {
+export function defaultRange(book: TickerBook): number {
+  const S = book.spot;
+  const strikes = book.legs.flatMap((l) => l.legs.map((g) => g.strike));
+  if (S <= 0 || !strikes.length) return MIN_DEFAULT_RANGE;
+  let need = MIN_DEFAULT_RANGE;
+  for (const k of strikes) need = Math.max(need, Math.abs(k / S - 1) * 1.15);
+  return RANGE_STOPS.find((r) => r >= need) ?? RANGE_STOPS[RANGE_STOPS.length - 1];
+}
+
+/** Spot grid for the x-axis, spanning +/- `range` around spot. */
+export function priceGrid(book: TickerBook, range: number, points = 241): number[] {
   const S = book.spot;
   if (S <= 0) return [];
-  const strikes = book.legs.flatMap((l) => l.legs.map((g) => g.strike));
-  let lo = S * 0.65;
-  let hi = S * 1.35;
-  for (const k of strikes) {
-    lo = Math.min(lo, k * 0.88);
-    hi = Math.max(hi, k * 1.12);
-  }
-  lo = Math.max(lo, 0.01);
+  const lo = Math.max(S * (1 - range), 0.01);
+  const hi = S * (1 + range);
   const step = (hi - lo) / (points - 1);
   return Array.from({ length: points }, (_, i) => lo + step * i);
 }
@@ -308,52 +323,121 @@ export function breakevens(prices: number[], pnl: number[]): number[] {
 export interface CurveExtremes {
   maxProfit: number;
   maxLoss: number;
-  /** The curve is still climbing at the right edge — gain is uncapped. */
+  /** Gain grows without bound as spot rises. */
   profitUncapped: boolean;
-  /** Still falling at the left edge, or climbing losses at the right. */
+  /** Loss grows without bound as spot rises. */
   lossUncapped: boolean;
+  /** Where the best case occurs, or null when it is unbounded. */
+  profitAt: ExtremePoint | null;
+  /** Where the worst case occurs, or null when it is unbounded. */
+  lossAt: ExtremePoint | null;
+}
+
+export interface ExtremePoint {
+  /** Label of the valuation date the extreme occurs on. */
+  label: string;
+  spot: number;
 }
 
 /**
- * Best and worst P&L on the curve.
+ * Slope of the payoff once spot is far above every strike.
  *
- * Read off the computed curve, not by summing per-trade maxGain/maxLoss: those
- * are independent worst cases and a covered call's short leg would report an
- * infinite loss the shares underneath it cannot suffer.
- *
- * A grid is a window, so an extreme sitting on its edge is a floor on the real
- * number, not the number. Whether it is worth saying so is a question of
- * scale, not of slope: a covered call marked before expiry is still gaining a
- * cent per dollar at the top of the range as the short call's last time value
- * decays, and calling that "uncapped" would be true and useless. The test is
- * therefore what widening the window would actually buy — extend it by its own
- * width again, and if the extreme moves by more than a twentieth of the P&L
- * already on screen, the edge was hiding something.
+ * Shares contribute their count; each call contributes 100 per contract, signed
+ * by which way it is held. Puts and cash go flat. This holds before expiry too:
+ * a deep-ITM call's delta tends to 1 whatever time is left, so the sign of this
+ * number decides unboundedness at every valuation date, not only the last.
  */
-export function curveExtremes(prices: number[], pnl: number[]): CurveExtremes {
-  if (pnl.length < 2) {
-    return { maxProfit: 0, maxLoss: 0, profitUncapped: false, lossUncapped: false };
+function asymptoticSlope(book: TickerBook): number {
+  let slope = 0;
+  for (const leg of book.legs) {
+    if (leg.trade.trade_type === "shares") {
+      slope += leg.trade.qty;
+      continue;
+    }
+    for (const g of leg.legs) {
+      if (g.cp === "call") slope += g.side * 100 * leg.trade.qty;
+    }
   }
+  return slope;
+}
+
+/**
+ * Best and worst P&L the book can reach, searched over spot AND over every
+ * valuation date the page offers.
+ *
+ * Collapsing every leg to intrinsic is the wrong question for a diagonal. A
+ * short call written against a long LEAPS is closed out when the short leg
+ * expires, with years of extrinsic value still in the long -- so pricing both
+ * at intrinsic reports a position that barely profits, when the actual trade
+ * peaks at the short strike on the short expiry with the long still carrying
+ * time value. The peak therefore has to be searched across dates, not just
+ * across spot at one date.
+ *
+ * Away from expiry the curve is smooth rather than piecewise linear, so the
+ * search is numerical: a dense sweep of spot, with every strike included
+ * exactly. Peaks sit at strikes far more often than anywhere else -- that is
+ * where the short leg's payoff bends -- and a sampled grid would otherwise
+ * shave the top off the very number being reported.
+ *
+ * The sweep is deliberately independent of the range slider, so zooming the
+ * chart cannot change what the position's best and worst cases are.
+ *
+ * Deliberately not built by summing trade.ts maxGain/maxLoss: those are
+ * portfolio risk heuristics (a long call's max gain is 4x premium there, a cc's
+ * max loss is 0 by convention), and summing per-trade worst cases would treat
+ * legs as independent when the whole point here is that they are not.
+ */
+export function bookExtremes(book: TickerBook, dates: AsOfDate[]): CurveExtremes {
+  const empty = {
+    maxProfit: 0,
+    maxLoss: 0,
+    profitUncapped: false,
+    lossUncapped: false,
+    profitAt: null,
+    lossAt: null,
+  };
+  if (!book.legs.length || book.spot <= 0 || !dates.length) return empty;
+
+  const strikes = book.legs.flatMap((l) => l.legs.map((g) => g.strike));
+  // Wide enough that the tails are flat well before the edge, so the sweep is
+  // measuring the structure rather than where the sweep happened to stop.
+  const hi = Math.max(book.spot * 3, ...strikes.map((k) => k * 1.5));
+  const N = 1200;
+  const sweep: number[] = [0, ...strikes];
+  for (let i = 0; i <= N; i++) sweep.push((hi * i) / N);
+
   let maxProfit = -Infinity;
   let maxLoss = Infinity;
-  for (const v of pnl) {
-    if (v > maxProfit) maxProfit = v;
-    if (v < maxLoss) maxLoss = v;
+  let profitAt: ExtremePoint | null = null;
+  let lossAt: ExtremePoint | null = null;
+
+  for (const d of dates) {
+    const pnl = curveAt(book, d.ms, sweep);
+    for (let i = 0; i < sweep.length; i++) {
+      if (pnl[i] > maxProfit) {
+        maxProfit = pnl[i];
+        profitAt = { label: d.label, spot: sweep[i] };
+      }
+      if (pnl[i] < maxLoss) {
+        maxLoss = pnl[i];
+        lossAt = { label: d.label, spot: sweep[i] };
+      }
+    }
   }
 
-  const n = pnl.length;
-  const width = prices[n - 1] - prices[0];
-  const span = Math.max(maxProfit - maxLoss, 1);
-  // What another window's width of price movement would add at each edge.
-  const outR = ((pnl[n - 1] - pnl[n - 2]) / (prices[n - 1] - prices[n - 2])) * width;
-  const outL = -((pnl[1] - pnl[0]) / (prices[1] - prices[0])) * width;
-  const material = (x: number) => x / span > 0.05;
+  const slope = asymptoticSlope(book);
+  // A fractional share cannot make a position unbounded; the tolerance keeps
+  // floating-point dust in a balanced structure from reading as open risk.
+  const profitUncapped = slope > 1e-9;
+  const lossUncapped = slope < -1e-9;
 
   return {
-    maxProfit,
-    maxLoss,
-    profitUncapped: material(outR) || material(outL),
-    lossUncapped: material(-outR) || material(-outL),
+    maxProfit: profitUncapped ? Infinity : maxProfit,
+    maxLoss: lossUncapped ? -Infinity : maxLoss,
+    profitUncapped,
+    lossUncapped,
+    profitAt: profitUncapped ? null : profitAt,
+    lossAt: lossUncapped ? null : lossAt,
   };
 }
 

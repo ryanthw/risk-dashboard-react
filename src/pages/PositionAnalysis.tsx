@@ -26,13 +26,15 @@ import { usePositionGreeks } from "@/api/positionGreeks";
 import { cn } from "@/lib/cn";
 import { fmtNum, fmtUsd, pnlClass } from "@/lib/format";
 import {
+  RANGE_STOPS,
   asOfDates,
+  bookExtremes,
   bookGreeks,
   bookPosition,
   breakevens as findBreakevens,
   buildBook,
   curveAt,
-  curveExtremes,
+  defaultRange,
   priceGrid,
   terminalDensity,
   tickersInBook,
@@ -77,6 +79,8 @@ export default function PositionAnalysis() {
   const { trades, isLoading, portfolioId } = useActivePortfolio();
   const [ticker, setTicker] = useState<string | null>(null);
   const [asOfIdx, setAsOfIdx] = useState(0);
+  // Null means "follow the book's own default"; a number is an explicit choice.
+  const [range, setRange] = useState<number | null>(null);
 
   const tickers = useMemo(() => tickersInBook(trades), [trades]);
 
@@ -104,11 +108,16 @@ export default function PositionAnalysis() {
   // The date bar is rebuilt per ticker, so an index from the previous ticker
   // can point past the end of the new one's expirations.
   const asOf = dates[Math.min(asOfIdx, dates.length - 1)] ?? dates[0] ?? null;
-  useEffect(() => setAsOfIdx(0), [ticker]);
+  useEffect(() => {
+    setAsOfIdx(0);
+    setRange(null);
+  }, [ticker]);
+
+  const effRange = range ?? (book ? defaultRange(book) : 0.2);
 
   const chart = useMemo(() => {
     if (!book || !asOf || book.spot <= 0) return null;
-    const prices = priceGrid(book);
+    const prices = priceGrid(book, effRange);
     if (!prices.length) return null;
     const pnl = curveAt(book, asOf.ms, prices);
     const today = asOf.date == null ? null : curveAt(book, Date.now(), prices);
@@ -118,9 +127,12 @@ export default function PositionAnalysis() {
       today,
       density: terminalDensity(book, asOf, prices),
       bes: findBreakevens(prices, pnl),
-      extremes: curveExtremes(prices, pnl),
+      // Searched over spot and over every valuation date, not read off the
+      // drawn curve, so zooming the x-axis never changes what the position's
+      // best and worst cases are.
+      extremes: bookExtremes(book, dates),
     };
-  }, [book, asOf]);
+  }, [book, asOf, effRange, dates]);
 
   const stats = useMemo(() => {
     if (!book) return null;
@@ -219,13 +231,43 @@ export default function PositionAnalysis() {
                 asOfLabel={asOf!.label}
               />
 
+              {/* Visible spot range. A native range input rather than a new
+                  Radix dependency: this is one number on a fixed set of stops,
+                  and the project has no slider primitive yet. */}
+              <div className="mt-4 flex items-center gap-3">
+                <label
+                  htmlFor="pa-range"
+                  className="shrink-0 text-[0.7rem] font-medium uppercase tracking-wider text-muted-foreground"
+                >
+                  Price range
+                </label>
+                <input
+                  id="pa-range"
+                  type="range"
+                  min={0}
+                  max={RANGE_STOPS.length - 1}
+                  step={1}
+                  value={RANGE_STOPS.indexOf(effRange) < 0 ? 3 : RANGE_STOPS.indexOf(effRange)}
+                  onChange={(e) => setRange(RANGE_STOPS[Number(e.target.value)])}
+                  aria-label="Visible spot range around the current price"
+                  aria-valuetext={`plus or minus ${Math.round(effRange * 100)} percent`}
+                  className="h-1.5 w-56 cursor-pointer appearance-none rounded-full bg-muted accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                />
+                <span className="w-14 shrink-0 text-xs text-muted-foreground tnum">
+                  ±{Math.round(effRange * 100)}%
+                </span>
+                <span className="text-[0.7rem] text-muted-foreground tnum">
+                  {fmtUsd(book!.spot * (1 - effRange))} – {fmtUsd(book!.spot * (1 + effRange))}
+                </span>
+              </div>
+
               {/* The expiration bar. Buttons rather than Radix Tabs: the panel
                   below is one chart re-valued, not a set of tab panels, and
                   Tabs would put the whole chart in a role="tabpanel" it isn't. */}
               <div
                 role="group"
                 aria-label="Valuation date"
-                className="mt-3 flex flex-wrap items-center gap-1 rounded-lg bg-muted p-1"
+                className="mt-2.5 flex flex-wrap items-center gap-1 rounded-lg bg-muted p-1"
               >
                 {dates.map((d, i) => (
                   <button
@@ -261,8 +303,10 @@ export default function PositionAnalysis() {
               }
               hint={
                 chart.extremes.profitUncapped
-                  ? "Still climbing at the edge of the modelled range"
-                  : `At ${asOf!.label}, across the modelled price range`
+                  ? "Long calls uncovered to the upside"
+                  : chart.extremes.profitAt
+                    ? `At ${fmtUsd(chart.extremes.profitAt.spot)} on ${chart.extremes.profitAt.label}`
+                    : "Best case across all expirations"
               }
             />
             <Metric
@@ -271,8 +315,10 @@ export default function PositionAnalysis() {
               value={chart.extremes.lossUncapped ? "Uncapped" : fmtUsd(chart.extremes.maxLoss)}
               hint={
                 chart.extremes.lossUncapped
-                  ? "Still falling at the edge of the modelled range"
-                  : `At ${asOf!.label}, across the modelled price range`
+                  ? "Short calls uncovered to the upside"
+                  : chart.extremes.lossAt
+                    ? `At ${fmtUsd(chart.extremes.lossAt.spot)} on ${chart.extremes.lossAt.label}`
+                    : "Worst case across all expirations"
               }
             />
             <Metric
