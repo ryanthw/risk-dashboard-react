@@ -60,7 +60,7 @@ export function BasisCard({ pos }: { pos: BasisPosition }) {
   const contracts: ContractRef[] = useMemo(
     () =>
       pos.kind === "long_call" && trade.expiration && trade.strike
-        ? [{ expiration: trade.expiration, strike: trade.strike }]
+        ? [{ expiration: trade.expiration, strike: trade.strike, cp: "C" as const }]
         : [],
     [pos.kind, trade.expiration, trade.strike],
   );
@@ -74,8 +74,16 @@ export function BasisCard({ pos }: { pos: BasisPosition }) {
   );
 
   // Prefer the live option mid over the BSM mark when the surface returned it.
+  //
+  // Matching the option type is not optional. vol-surface caches per ticker and
+  // returns every contract in that cache, not just the ones this card asked
+  // for, so once another tab quotes a PUT at the same expiration and strike --
+  // Position Analysis does exactly that -- an expiration+strike match returns
+  // it first. This is a long-call card: it would then mark a LEAPS at the put's
+  // mid and report the put's negative delta. A pre-`cp` cache entry matches
+  // nothing here and falls back to the BSM mark, which is the safe direction.
   const liveQuote = vol.data?.contracts.find(
-    (c) => c.expiration === trade.expiration && c.strike === trade.strike,
+    (c) => c.cp === "C" && c.expiration === trade.expiration && c.strike === trade.strike,
   );
   const markTotal =
     pos.kind === "long_call" && liveQuote && liveQuote.mid > 0
