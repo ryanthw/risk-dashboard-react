@@ -13,9 +13,16 @@
 // otherwise the level is rebuilt from a point that is always liquid:
 //
 //   1. contract   the contract's own IV, if its quote passes every gate below
-//   2. atm_skew   ATM IV x this position's stored iv/atm ratio. Skew at a fixed
-//                 strike drifts far more slowly than the vol level does, so an
-//                 illiquid wing still tracks the surface it sits on.
+//   2. atm_skew   ATM IV x this position's iv/atm ratio. Skew at a fixed strike
+//                 drifts far more slowly than the vol level does, so an illiquid
+//                 wing still tracks the surface it sits on. The ratio comes from
+//                 the last trusted read of this contract, or — for one that has
+//                 never had a trusted read, because it is quoted too wide or is
+//                 not listed on this expiration — from the nearest strike whose
+//                 quote is sound. Without that seeding, a permanently illiquid
+//                 position could never reach this tier at all: the only thing
+//                 that stores a ratio is a tier-1 success, so it would hold a
+//                 stale mark forever, exactly where the mark is least reliable.
 //   3. last_good  hold the previous value. Honest when there is nothing to read.
 //
 // Realized vol is deliberately NOT a fallback. Implied runs above realized the
@@ -46,6 +53,11 @@ const MAX_REL_SPREAD = 0.30;
 // not skew. Generous on the high side: real put skew on a small cap gets steep.
 const SKEW_BAND_LO = 0.4;
 const SKEW_BAND_HI = 3.0;
+// How far a neighbouring strike may sit from the position's own before its skew
+// stops being a fair stand-in, as a fraction of the position's strike. An
+// adjacent listed strike is a good proxy; extrapolating a deep-ITM LEAP's vol
+// from the nearest quotable contract several strikes away is not.
+const MAX_NEIGHBOUR_STRIKE_GAP = 0.20;
 // Concurrent chain reads. The book is small; this is politeness, not throughput.
 const CONCURRENCY = 4;
 
@@ -180,6 +192,45 @@ function atmIvOf(live: Row[]): number | null {
   return ivs.reduce((a, b) => a + b, 0) / ivs.length;
 }
 
+/**
+ * Is this quote worth reading a vol level off? Shared by tier 1 and by the
+ * skew bootstrap, so a contract can never be trusted to seed a ratio on terms
+ * stricter or looser than the ones that would let it be used directly.
+ */
+function quoteIsSound(r: Row, atm: number | null): boolean {
+  const relSpread = r.mid > 0 ? (r.ask - r.bid) / r.mid : Infinity;
+  if (!(relSpread <= MAX_REL_SPREAD)) return false;
+  if (atm != null && (r.iv < atm * SKEW_BAND_LO || r.iv > atm * SKEW_BAND_HI)) return false;
+  return true;
+}
+
+/**
+ * A skew ratio for a position whose own contract cannot supply one — because it
+ * is not listed on this expiration, or is quoted too wide to believe.
+ *
+ * Takes the nearest strike on the same side whose quote *is* sound and uses its
+ * iv/atm. Skew is a smooth function of strike, so an adjacent contract is a
+ * good local estimate; the distance bound stops that becoming an extrapolation
+ * across half the chain.
+ *
+ * This is what lets a permanently illiquid position reach tier 2 at all. Tier 2
+ * needs a stored ratio, the only thing that stored one was a successful tier-1
+ * read, and a contract that never passes tier 1 would otherwise sit on
+ * last_good forever — going stale precisely where the mark is least reliable.
+ */
+function bootstrapSkew(
+  side: Row[],
+  strike: number,
+  atm: number | null,
+): { ratio: number; from: number } | null {
+  if (atm == null || atm <= 0) return null;
+  const sound = side.filter((r) => quoteIsSound(r, atm));
+  const hit = nearestBy(sound, (r) => r.strike, strike);
+  if (!hit) return null;
+  if (Math.abs(hit.strike - strike) / strike > MAX_NEIGHBOUR_STRIKE_GAP) return null;
+  return { ratio: hit.iv / atm, from: hit.strike };
+}
+
 /** Resolve one position against its expiration's chain. */
 function resolve(pos: PositionReq, rows: Row[] | null, dte: number): Resolved {
   const held = (reason: string, atm: number | null = null): Resolved => ({
@@ -204,27 +255,31 @@ function resolve(pos: PositionReq, rows: Row[] | null, dte: number): Resolved {
   if (dte < DTE_MIN) return held(`${dte} DTE — inside the pin window`, atm);
 
   const side = live.filter((r) => r.cp === pos.right);
+
+  const viaSkew = (reason: string): Resolved => {
+    if (atm == null) return held(`${reason}; no ATM anchor either`, null);
+
+    const stored = pos.iv_skew_ratio != null && pos.iv_skew_ratio > 0
+      ? { ratio: pos.iv_skew_ratio, note: reason }
+      : null;
+    const boot = stored ?? (() => {
+      const b = bootstrapSkew(side, pos.strike, atm);
+      return b ? { ratio: b.ratio, note: `${reason}; skew seeded from K${b.from}` } : null;
+    })();
+
+    if (!boot) return held(`${reason}; no sound strike nearby to seed skew from`, atm);
+    return {
+      id: pos.id,
+      iv: +(atm * boot.ratio).toFixed(4),
+      source: "atm_skew",
+      atm_iv: +atm.toFixed(4),
+      skew_ratio: +boot.ratio.toFixed(4),
+      reason: boot.note,
+    };
+  };
+
   const hit = nearestBy(side, (r) => r.strike, pos.strike);
-  const onStrike = hit && Math.abs(hit.strike - pos.strike) < 0.01;
-
-  const viaSkew = (reason: string): Resolved =>
-    atm != null && pos.iv_skew_ratio != null && pos.iv_skew_ratio > 0
-      ? {
-          id: pos.id,
-          iv: +(atm * pos.iv_skew_ratio).toFixed(4),
-          source: "atm_skew",
-          atm_iv: +atm.toFixed(4),
-          skew_ratio: pos.iv_skew_ratio,
-          reason,
-        }
-      : held(
-          atm == null
-            ? `${reason}; no ATM anchor either`
-            : `${reason}; no stored skew ratio to rebuild from`,
-          atm,
-        );
-
-  if (!hit || !onStrike) return viaSkew("strike not listed");
+  if (!hit || Math.abs(hit.strike - pos.strike) >= 0.01) return viaSkew("strike not listed");
 
   const relSpread = hit.mid > 0 ? (hit.ask - hit.bid) / hit.mid : Infinity;
   if (!(relSpread <= MAX_REL_SPREAD)) {
