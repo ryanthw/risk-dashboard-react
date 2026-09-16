@@ -21,15 +21,20 @@ The relationship is one-way:
                                                    READ ONLY
 ```
 
-`earnings_reliability` and `income_universe` are populated only from the research
-side. This repo owns their schema and a `select`-only RLS policy, and contains no
-`insert`, `update`, `upsert`, or `delete` against either — the Earnings and Income
-scanners read them and nothing more. If you are changing the data layer, keep it
-that way; this check should return nothing:
+`earnings_reliability`, `income_universe` and `research_book_stats` are populated
+only from the research side. This repo owns their schema and a `select`-only RLS
+policy, and contains no `insert`, `update`, `upsert`, or `delete` against any of
+them — the Earnings and Income scanners and the Portfolio Insights tab read them
+and nothing more. If you are changing the data layer, keep it that way; this
+check should return nothing:
 
 ```sh
-grep -rnE '\.from\(\s*.(earnings_reliability|income_universe).\s*\)\s*\.\s*(insert|upsert|update|delete)' src supabase scripts
+grep -rnE '\.from\(\s*.(earnings_reliability|income_universe|research_book_stats).\s*\)\s*\.\s*(insert|upsert|update|delete)' src supabase scripts
 ```
+
+The first two hold shared reference data readable by any authenticated user.
+`research_book_stats` is different: it holds your own trading record, so its RLS
+scopes to `auth.uid()` exactly as `trades` and `history_trades` do.
 
 **Self-hosting:** the migrations create those two tables empty. Everything else
 works out of the box; the Earnings and Income scanners return nothing until you

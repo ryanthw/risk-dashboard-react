@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const PortfolioInsights = lazy(() => import("@/pages/PortfolioInsights"));
 const Visuals = lazy(() => import("@/pages/Visuals"));
 const Strategy = lazy(() => import("@/pages/Strategy"));
 const History = lazy(() => import("@/pages/History"));
@@ -40,6 +41,7 @@ export default function App() {
         {user ? (
           <Route element={<AppShell />}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/insights" element={<PortfolioInsights />} />
             <Route path="/visuals" element={<Visuals />} />
             <Route path="/strategy" element={<Strategy />} />
             <Route path="/income-scanner" element={<IncomeScanner />} />

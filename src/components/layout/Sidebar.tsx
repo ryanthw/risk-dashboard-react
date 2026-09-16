@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
+  Lightbulb,
   BarChart3,
   Target,
   History as HistoryIcon,
@@ -23,6 +24,7 @@ import { AccountDialog } from "./AccountDialog";
 
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/insights", label: "Portfolio Insights", icon: Lightbulb },
   { to: "/visuals", label: "Visuals", icon: BarChart3 },
   { to: "/strategy", label: "Strategy", icon: Target },
   { to: "/history", label: "History", icon: HistoryIcon },
