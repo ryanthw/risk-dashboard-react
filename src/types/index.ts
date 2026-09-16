@@ -65,9 +65,29 @@ export interface Trade {
   cost_basis: number | null;
   sector: string;
   beta: number;
+  /** IV as entered at open. Stamped once — `iv` above is marked live. */
+  iv_at_open: number | null;
+  /** The expiration's ATM IV at open, the denominator behind iv_skew_ratio. */
+  atm_iv_at_open: number | null;
+  /** Spot at open. Null on positions opened before entry stamping existed. */
+  underlying_at_open: number | null;
+  /** iv / atm_iv for this contract; the anchor used when its own quote is bad. */
+  iv_skew_ratio: number | null;
+  iv_source: IvSource | null;
+  iv_updated_at: string | null;
   opened_at: string;
   updated_at: string;
 }
+
+/** How a position's live `iv` was last resolved. See functions/position-iv. */
+export type IvSource = "entry" | "contract" | "atm_skew" | "last_good";
+
+/**
+ * How a position ended. Defined here rather than in engine/cashFlow because
+ * HistoryTrade records it and types must not import from the engine.
+ * engine/cashFlow re-exports it, so existing imports are unaffected.
+ */
+export type ExitPath = "close" | "expired" | "assigned" | "called_away";
 
 /** Fields needed to create a trade (server fills ids/timestamps). */
 export interface TradeInput {
@@ -86,6 +106,12 @@ export interface TradeInput {
   beta?: number;
   /** When the position was opened. Omitted means now (the column default). */
   opened_at?: string;
+  /** Entry stamps. Filled in by useUpsertTrade on create, not by the form. */
+  iv_at_open?: number | null;
+  atm_iv_at_open?: number | null;
+  underlying_at_open?: number | null;
+  iv_skew_ratio?: number | null;
+  iv_source?: IvSource | null;
 }
 
 export interface Portfolio {
@@ -111,6 +137,27 @@ export interface HistoryTrade {
   max_loss: number;
   final_value: number;
   created_at: string;
+
+  // ---- Entry snapshot, captured at archive ------------------------------
+  // Null on rows archived before migration 0011: those trades' `trades` row was
+  // hard-deleted under the old eight-column write and nothing can recover them.
+  // Null means "not recorded" throughout — never zero.
+  qty: number | null;
+  strike: number | null;
+  strike_2: number | null;
+  premium: number | null;
+  expiration: string | null;
+  cost_basis: number | null;
+  iv_at_open: number | null;
+  atm_iv_at_open: number | null;
+  underlying_at_open: number | null;
+  underlying_at_close: number | null;
+  sector: string | null;
+  beta: number | null;
+  /** How the position ended — a buy-back and an expiry read alike in P&L. */
+  exit_path: ExitPath | null;
+  /** Provenance of iv_at_close. */
+  iv_source: IvSource | null;
 }
 
 export interface Snapshot {

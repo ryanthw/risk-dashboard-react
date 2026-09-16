@@ -37,10 +37,33 @@ export function useRefreshMarketData(portfolio: Portfolio | undefined, trades: T
       } else if (report.failed.length > 0) {
         toast.error("Some quotes failed", `${report.failed.join(", ")} kept stale prices`);
       } else {
-        toast.success(
-          "Market data refreshed",
-          report.snapshotLogged ? "Snapshot logged" : "Snapshot already logged today",
-        );
+        const { contract, atmSkew, held, failedGroups } = report.iv;
+        const marked = contract + atmSkew;
+        const snapNote = report.snapshotLogged
+          ? "Snapshot logged"
+          : "Snapshot already logged today";
+
+        // The whole IV call going down is the loudest thing that can happen
+        // here and the easiest to miss: no marks come back, so a count-based
+        // message would render as "0 updated" or, worse, as nothing at all.
+        // It gets its own toast rather than a suffix on a success one.
+        if (failedGroups.includes("*")) {
+          toast.error(
+            "IV marks unavailable",
+            "position-iv did not respond — every position kept its previous mark",
+          );
+        } else if (marked + held.length === 0) {
+          toast.success("Market data refreshed", snapNote);
+        } else {
+          // Worth saying out loud: the risk numbers on this page now move with
+          // the surface, so which positions did and did not get a fresh mark is
+          // part of knowing how much to trust them.
+          const ivNote =
+            held.length === 0
+              ? `${marked} IV mark${marked === 1 ? "" : "s"} updated`
+              : `${marked} IV updated, ${held.length} held`;
+          toast.success("Market data refreshed", `${snapNote} · ${ivNote}`);
+        }
       }
     } catch (e) {
       toast.error("Refresh failed", String((e as Error).message));
