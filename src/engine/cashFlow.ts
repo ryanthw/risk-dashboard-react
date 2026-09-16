@@ -10,7 +10,13 @@
  * So closing amounts are captured from the broker confirmation and P&L is
  * derived from the pair.
  */
-import { CREDIT_TYPES, type CashFlowKind, type Trade, type TradeType } from "@/types";
+import {
+  CREDIT_TYPES,
+  type CashFlowKind,
+  type ExitPath,
+  type Trade,
+  type TradeType,
+} from "@/types";
 
 /**
  * Flows that change the capital base rather than the portfolio earning or
@@ -45,7 +51,9 @@ export function openingCashFlow(trade: Trade): number {
   return isCredit(t) ? gross : -gross;
 }
 
-export type ExitPath = "close" | "expired" | "assigned" | "called_away";
+// Canonical definition lives in @/types (HistoryTrade stores it); re-exported
+// here so every existing `from "@/engine/cashFlow"` import keeps resolving.
+export type { ExitPath } from "@/types";
 
 export const EXIT_PATH_LABELS: Record<ExitPath, string> = {
   close: "Closed",

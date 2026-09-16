@@ -23,6 +23,11 @@ function mapTrade(row: Record<string, unknown>): Trade {
     underlying_price: row.underlying_price == null ? null : Number(row.underlying_price),
     cost_basis: row.cost_basis == null ? null : Number(row.cost_basis),
     beta: Number(row.beta ?? 1),
+    iv_at_open: row.iv_at_open == null ? null : Number(row.iv_at_open),
+    atm_iv_at_open: row.atm_iv_at_open == null ? null : Number(row.atm_iv_at_open),
+    underlying_at_open:
+      row.underlying_at_open == null ? null : Number(row.underlying_at_open),
+    iv_skew_ratio: row.iv_skew_ratio == null ? null : Number(row.iv_skew_ratio),
   };
 }
 
@@ -48,13 +53,30 @@ export function useUpsertTrade() {
   const { user } = useAuth();
   return useMutation({
     mutationFn: async (input: TradeInput & { id?: string }): Promise<Trade> => {
+      const isCreate = !input.id;
       const payload = {
         ...input,
         user_id: user!.id,
         sector: input.sector ?? "Unknown",
         beta: input.beta ?? 1.0,
+        // Entry conditions, stamped once. `iv` and `underlying_price` are both
+        // overwritten later — iv by the position-iv mark, underlying_price by
+        // every quote refresh — so the values the position was actually opened
+        // at only survive if they are copied aside here, at the one moment they
+        // are known to be the entry values.
+        //
+        // atm_iv_at_open and iv_skew_ratio are left for the first successful
+        // mark to fill: they need the expiration's chain, which this path has
+        // no reason to fetch. Only on create — an edit restates this same row
+        // and must not restamp what the position opened at.
+        ...(isCreate
+          ? {
+              iv_at_open: input.iv,
+              underlying_at_open: input.underlying_price,
+              iv_source: "entry" as const,
+            }
+          : {}),
       };
-      const isCreate = !input.id;
       const { data, error } = await supabase
         .from("trades")
         .upsert(payload)
@@ -120,6 +142,18 @@ export function useUpdateTrade() {
       patch: TradePatch,
     ): Promise<{ trade: Trade; cashDelta: number }> => {
       const { id, portfolio_id: _p, previous, ...fields } = patch;
+
+      // Correcting a mis-keyed entry IV should fix what the position opened at,
+      // not just what it is marked at — but only while the two are still the
+      // same number. Once position-iv has marked the trade live, `iv` is the
+      // mark and editing it is an override of today's value; rewriting
+      // iv_at_open from it would backdate that override into history.
+      const correctsEntryIv =
+        fields.iv != null &&
+        fields.iv !== previous.iv &&
+        (previous.iv_source == null || previous.iv_source === "entry");
+      if (correctsEntryIv) fields.iv_at_open = fields.iv;
+
       const { data, error } = await supabase
         .from("trades")
         .update(fields)

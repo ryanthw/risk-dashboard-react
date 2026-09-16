@@ -127,6 +127,12 @@ async function main() {
       underlying_price: num(r.underlying_price),
       cost_basis: num(r.cost_basis),
       beta: Number(r.beta ?? 1),
+      iv_at_open: num(r.iv_at_open),
+      atm_iv_at_open: num(r.atm_iv_at_open),
+      underlying_at_open: num(r.underlying_at_open),
+      // Postgres hands numerics back as strings; the IV fallback multiplies by
+      // this one, so it has to arrive as a number like every other column here.
+      iv_skew_ratio: num(r.iv_skew_ratio),
     })) as Trade[];
 
     try {
@@ -141,6 +147,24 @@ async function main() {
       }
       if (report.failed.length > 0) {
         console.error(`[${portfolio.name}] quote failures: ${report.failed.join(", ")}`);
+      }
+
+      const { contract, atmSkew, held, failedGroups } = report.iv;
+      if (contract + atmSkew + held.length > 0) {
+        console.log(
+          `[${portfolio.name}] IV marks — ${contract} from contract, ${atmSkew} from ATM+skew, ${held.length} held`,
+        );
+      }
+      // Named individually: a position that holds its mark every run is a
+      // contract that has stopped being quotable, and that is worth noticing
+      // long before expiry rather than discovering at assignment.
+      for (const h of held) {
+        console.error(`[${portfolio.name}] IV held ${h.ticker}: ${h.reason}`);
+      }
+      if (failedGroups.length > 0) {
+        console.error(
+          `[${portfolio.name}] chain read failed: ${failedGroups.includes("*") ? "position-iv unavailable" : failedGroups.join(", ")}`,
+        );
       }
 
       if (report.snapshotLogged) {

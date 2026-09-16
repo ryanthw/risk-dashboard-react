@@ -52,6 +52,14 @@ function draftToTrade(draft: TradeDraft, portfolioId: string): Trade {
     underlying_price: draft.underlying_price ?? 0,
     sector: draft.sector,
     beta: draft.beta,
+    // A sandbox draft has no history: it was never opened, so it has no entry
+    // conditions, and it is never marked, so `iv` is whatever the user typed.
+    iv_at_open: draft.iv,
+    atm_iv_at_open: null,
+    underlying_at_open: draft.underlying_price ?? 0,
+    iv_skew_ratio: null,
+    iv_source: "entry",
+    iv_updated_at: null,
     opened_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

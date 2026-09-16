@@ -37,9 +37,20 @@ export function useRefreshMarketData(portfolio: Portfolio | undefined, trades: T
       } else if (report.failed.length > 0) {
         toast.error("Some quotes failed", `${report.failed.join(", ")} kept stale prices`);
       } else {
+        const { contract, atmSkew, held } = report.iv;
+        const marked = contract + atmSkew;
+        // Worth saying out loud: the risk numbers on this page now move with
+        // the surface, so which positions did and did not get a fresh mark is
+        // part of knowing how much to trust them.
+        const ivNote =
+          marked + held.length === 0
+            ? ""
+            : held.length === 0
+              ? ` · ${marked} IV mark${marked === 1 ? "" : "s"} updated`
+              : ` · ${marked} IV updated, ${held.length} held`;
         toast.success(
           "Market data refreshed",
-          report.snapshotLogged ? "Snapshot logged" : "Snapshot already logged today",
+          `${report.snapshotLogged ? "Snapshot logged" : "Snapshot already logged today"}${ivNote}`,
         );
       }
     } catch (e) {

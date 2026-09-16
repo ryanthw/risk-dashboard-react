@@ -11,7 +11,7 @@ import {
   type ExitInput,
   type SharesDelta,
 } from "@/engine/cashFlow";
-import type { HistoryTrade, Snapshot, Trade } from "@/types";
+import type { ExitPath, HistoryTrade, IvSource, Snapshot, Trade } from "@/types";
 
 // ---- Closed-trade history ----------------------------------------------------
 
@@ -71,8 +71,14 @@ export function useArchiveTrade() {
       // Assignment delivers stock; call-away takes it. Reflect that in the
       // position list so the book matches reality without manual fixing up.
       const delta = sharesDelta(trade, exit.path);
-      if (delta) await applySharesDelta(trade, delta, user!.id);
+      if (delta) await applySharesDelta(trade, delta, user!.id, exit.path);
 
+      // The whole position, not just its result. The `trades` row is deleted
+      // four lines below, so anything not copied here stops existing — and
+      // strike, premium, qty and the exit path are what any later analysis of
+      // *why* a trade worked has to join on. Realized P&L alone can't tell a
+      // short put that expired worthless from one bought back at a loss and
+      // re-sold, and can't express a return on the capital actually at risk.
       const { error: insErr } = await supabase.from("history_trades").insert({
         user_id: user!.id,
         portfolio_id: trade.portfolio_id,
@@ -84,6 +90,23 @@ export function useArchiveTrade() {
         iv_at_close: trade.iv,
         max_loss: Number.isFinite(maxLoss) ? maxLoss : 0,
         final_value: value,
+
+        qty: trade.qty,
+        strike: trade.strike,
+        strike_2: trade.strike_2,
+        premium: trade.premium,
+        expiration: trade.expiration,
+        cost_basis: trade.cost_basis,
+        iv_at_open: trade.iv_at_open,
+        atm_iv_at_open: trade.atm_iv_at_open,
+        underlying_at_open: trade.underlying_at_open,
+        // Current spot: refreshPortfolio keeps underlying_price marked, so at
+        // the moment of archiving it is the price at close.
+        underlying_at_close: trade.underlying_price,
+        sector: trade.sector,
+        beta: trade.beta,
+        exit_path: exit.path,
+        iv_source: trade.iv_source,
       });
       if (insErr) throw insErr;
 
@@ -109,6 +132,11 @@ interface ShareLot {
   cost_basis: number | null;
   opened_at: string;
   iv: number;
+  iv_at_open: number | null;
+  underlying_at_open: number | null;
+  iv_source: IvSource | null;
+  sector: string | null;
+  beta: number | null;
 }
 
 /**
@@ -122,7 +150,12 @@ interface ShareLot {
  * lot's basis. Being called away above your basis *is* a gain, and it belongs
  * to the shares, not to the call (whose result is the premium alone).
  */
-async function applySharesDelta(trade: Trade, delta: SharesDelta, userId: string) {
+async function applySharesDelta(
+  trade: Trade,
+  delta: SharesDelta,
+  userId: string,
+  exitPath: ExitPath,
+) {
   const { data: rows, error } = await supabase
     .from("trades")
     .select("*")
@@ -165,6 +198,12 @@ async function applySharesDelta(trade: Trade, delta: SharesDelta, userId: string
         iv: trade.iv,
         sector: trade.sector,
         beta: trade.beta,
+        // A new position, so it gets entry stamps like any other. Stock arriving
+        // by assignment is acquired at the strike, which is what basisPerShare
+        // holds — not the current quote in underlying_price.
+        underlying_at_open: delta.basisPerShare,
+        iv_at_open: trade.iv,
+        iv_source: "entry",
       });
       if (e) throw e;
     }
@@ -199,6 +238,20 @@ async function applySharesDelta(trade: Trade, delta: SharesDelta, userId: string
       // Capital that was at risk on the sold slice: stock can go to zero.
       max_loss: basis == null ? 0 : basis * sold,
       final_value: strike * sold,
+
+      // Only the slice that actually left, not the whole lot.
+      qty: sold,
+      cost_basis: basis,
+      iv_at_open: lot.iv_at_open,
+      underlying_at_open: lot.underlying_at_open,
+      // Stock disposed by an option exit leaves at the strike, by definition.
+      underlying_at_close: strike,
+      sector: lot.sector,
+      beta: lot.beta,
+      // Inherited from the option whose exit moved the stock: the shares did
+      // not end on their own terms, they were called away or put to the book.
+      exit_path: exitPath,
+      iv_source: lot.iv_source,
     });
     if (insErr) throw insErr;
 
