@@ -12,6 +12,7 @@ import { useRefreshMarketData } from "@/hooks/useRefreshMarketData";
 // "Dashboard", which is how four pages ended up mislabelled.
 const TITLES: Record<string, string> = {
   "/": "Dashboard",
+  "/insights": "Portfolio Insights",
   "/visuals": "Visual Analysis",
   "/strategy": "PM Strategy & Allocation",
   "/history": "Historical Analysis",

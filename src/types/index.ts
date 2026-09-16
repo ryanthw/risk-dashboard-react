@@ -114,6 +114,79 @@ export interface TradeInput {
   iv_source?: IvSource | null;
 }
 
+/**
+ * One row of research_book_stats — what this account's own closed trades say
+ * about a portfolio, a structure within it, a ticker within it, or the pair.
+ * Written only by the research side; this app holds select-only RLS on it.
+ *
+ * Every measure carries its own sample count and they diverge sharply, so a
+ * consumer must read the matching `n_*` before rendering a rate. Most of the
+ * richer fields are null for trades archived before migration 0011 and always
+ * will be — those rows have no strike, premium, quantity or exit path.
+ */
+export type StatGrain = "portfolio" | "strategy" | "ticker" | "ticker_strategy";
+
+export interface BookStat {
+  portfolio_id: string;
+  grain: StatGrain;
+  /** '' where the grain does not use it. */
+  ticker: string;
+  trade_type: string;
+  portfolio_name: string | null;
+
+  // sample
+  n: number;
+  n_full: number;
+  n_pnl: number;
+  n_wins: number;
+  // result
+  win_rate: number | null;
+  total_pnl: number | null;
+  mean_pnl: number | null;
+  median_pnl: number | null;
+  best_pnl: number | null;
+  worst_pnl: number | null;
+  profit_factor: number | null;
+  expectancy: number | null;
+  // return on capital
+  n_ror: number;
+  mean_ror: number | null;
+  median_ror: number | null;
+  mean_ann_ror: number | null;
+  n_return_on_premium: number;
+  mean_return_on_premium: number | null;
+  mean_pct_max_gain_captured: number | null;
+  // timing
+  mean_hold_days: number | null;
+  median_hold_days: number | null;
+  n_dte: number;
+  mean_dte_at_entry: number | null;
+  mean_dte_held_pct: number | null;
+  // entry conditions (post-0011 only)
+  n_moneyness: number;
+  mean_moneyness_at_entry: number | null;
+  n_premium_yield: number;
+  mean_premium_yield_ann: number | null;
+  n_iv: number;
+  mean_iv_at_open: number | null;
+  mean_iv_vs_atm_at_open: number | null;
+  mean_iv_change_pct: number | null;
+  // outcome (post-0011 only)
+  n_exit_path: number;
+  rate_expired: number | null;
+  rate_assigned: number | null;
+  rate_called_away: number | null;
+  rate_closed_early: number | null;
+  n_itm: number;
+  rate_finished_itm: number | null;
+  rate_move_favored: number | null;
+  mean_underlying_move_pct: number | null;
+  // window
+  first_exit: string | null;
+  last_exit: string | null;
+  as_of: string;
+}
+
 export interface Portfolio {
   id: string;
   user_id: string;
