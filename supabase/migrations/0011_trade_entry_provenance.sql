@@ -26,9 +26,13 @@
 -- retyped, and no existing value is overwritten. NULL means "not recorded",
 -- never zero — the attribution work downstream has to be able to tell a trade
 -- that had no premium from one whose premium was never captured.
+--
+-- No explicit BEGIN/COMMIT, matching 0001-0010: `supabase db push` runs each
+-- migration inside its own transaction, and committing from in here would close
+-- that early and leave the migration-history insert outside it. The guard at the
+-- bottom still aborts the whole thing — applied by hand, use
+-- `psql --single-transaction` so it has a transaction to abort.
 -- ============================================================================
-
-begin;
 
 -- ---------------------------------------------------------------------------
 -- trades — entry-invariant stamps, written once at open and never refreshed,
@@ -172,8 +176,6 @@ begin
   raise notice '0011 applied: % trades, % history rows (% with null realized_pnl, unchanged)',
     n_trades, n_hist, n_pnl_null;
 end $$;
-
-commit;
 
 -- ---------------------------------------------------------------------------
 -- Verify after applying (expect: every history row preserved, new columns
