@@ -46,12 +46,12 @@ const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
 
 describe("dominant structure", () => {
   it("does not credit a structure that only earns its share of trades", () => {
-    // 57% of trades, 56% of P&L: the book's average, not what is carrying it.
+    // 60% of trades, 58% of P&L: the book's average, not what is carrying it.
     const out = buildInsights(
       [
         portfolio(100, 1000),
-        structure("cc", { n_pnl: 57, n_wins: 45, total_pnl: 560 }),
-        structure("long_call", { n_pnl: 12, n_wins: 10, total_pnl: 430, best_pnl: 100 }),
+        structure("cc", { n_pnl: 60, n_wins: 48, total_pnl: 580 }),
+        structure("long_call", { n_pnl: 10, n_wins: 8, total_pnl: 400, best_pnl: 100 }),
       ],
       [],
     );
@@ -63,7 +63,7 @@ describe("dominant structure", () => {
     const out = buildInsights(
       [
         portfolio(100, 1000),
-        structure("long_call", { n_pnl: 12, n_wins: 10, total_pnl: 500, best_pnl: 250 }),
+        structure("long_call", { n_pnl: 10, n_wins: 8, total_pnl: 500, best_pnl: 250 }),
       ],
       [],
     );
