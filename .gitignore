@@ -23,3 +23,6 @@ supabase/.temp/
 .env.*
 !.env.example
 research/
+
+# Rendered portfolio reports: a real account's positions and balances.
+report-out/

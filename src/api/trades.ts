@@ -8,28 +8,10 @@ import {
   recordCashFlow,
 } from "./cashFlows";
 import { openingCashFlow } from "@/engine/cashFlow";
+import { mapTrade } from "@/lib/rows";
 import type { Trade, TradeInput } from "@/types";
 
 const KEY = "trades";
-
-function mapTrade(row: Record<string, unknown>): Trade {
-  return {
-    ...(row as unknown as Trade),
-    qty: Number(row.qty),
-    strike: row.strike == null ? null : Number(row.strike),
-    strike_2: row.strike_2 == null ? null : Number(row.strike_2),
-    premium: row.premium == null ? null : Number(row.premium),
-    iv: Number(row.iv),
-    underlying_price: row.underlying_price == null ? null : Number(row.underlying_price),
-    cost_basis: row.cost_basis == null ? null : Number(row.cost_basis),
-    beta: Number(row.beta ?? 1),
-    iv_at_open: row.iv_at_open == null ? null : Number(row.iv_at_open),
-    atm_iv_at_open: row.atm_iv_at_open == null ? null : Number(row.atm_iv_at_open),
-    underlying_at_open:
-      row.underlying_at_open == null ? null : Number(row.underlying_at_open),
-    iv_skew_ratio: row.iv_skew_ratio == null ? null : Number(row.iv_skew_ratio),
-  };
-}
 
 export function useTrades(portfolioId: string | null) {
   const { user } = useAuth();
