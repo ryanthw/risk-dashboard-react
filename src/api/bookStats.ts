@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/store/auth";
+import { mapBookStat } from "@/lib/rows";
 import type { BookStat } from "@/types";
 
 /**
@@ -28,33 +29,9 @@ export function useBookStats(portfolioId: string | null) {
         .select("*")
         .eq("portfolio_id", portfolioId!);
       if (error) throw error;
-      return (data ?? []).map(mapStat);
+      // numeric arrives as a string; null stays null — for most of these
+      // columns it means "not recordable for trades archived before 0011".
+      return (data ?? []).map(mapBookStat);
     },
   });
-}
-
-// PostgREST returns `numeric` as a string. Coerce every numeric column, keeping
-// null distinct from 0 throughout: null means "not recorded", and for most of
-// these columns it means "not recordable for trades archived before 0011".
-const NUM: (keyof BookStat)[] = [
-  "n", "n_full", "n_pnl", "n_wins", "win_rate", "total_pnl", "mean_pnl",
-  "median_pnl", "best_pnl", "worst_pnl", "profit_factor", "expectancy",
-  "n_ror", "mean_ror", "median_ror", "mean_ann_ror", "n_return_on_premium",
-  "mean_return_on_premium", "mean_pct_max_gain_captured", "mean_hold_days",
-  "median_hold_days", "n_dte", "mean_dte_at_entry", "mean_dte_held_pct",
-  "n_moneyness", "mean_moneyness_at_entry", "n_premium_yield",
-  "mean_premium_yield_ann", "n_iv", "mean_iv_at_open", "mean_iv_vs_atm_at_open",
-  "mean_iv_change_pct", "n_exit_path", "rate_expired", "rate_assigned",
-  "rate_called_away", "rate_closed_early", "n_itm", "rate_finished_itm",
-  "rate_move_favored", "mean_underlying_move_pct",
-];
-
-function mapStat(row: Record<string, unknown>): BookStat {
-  const out = { ...(row as unknown as BookStat) };
-  for (const k of NUM) {
-    const v = row[k as string];
-    (out as Record<string, unknown>)[k as string] =
-      v == null ? null : Number(v);
-  }
-  return out;
 }

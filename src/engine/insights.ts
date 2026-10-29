@@ -101,7 +101,7 @@ export function buildInsights(stats: BookStat[], open: Trade[]): Insight[] {
 
   // ---- where the money actually came from --------------------------------
   // "Carrying" means out-earning its weight, not just being large: a structure
-  // that is 57% of trades and 56% of P&L is the book's average, and naming it
+  // that is 60% of trades and 60% of P&L is the book's average, and naming it
   // would bury whatever actually is pulling ahead. The share-of-P&L claim is a
   // portfolio-level statement, so it is gated on the portfolio's sample; the
   // structure still needs enough trades of its own to be named at all.
