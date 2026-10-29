@@ -21,7 +21,9 @@ jobs:
       - run: npm ci
 
       # No lint step: this project has never had eslint installed or configured.
-      # typecheck and build are the checks that actually mean something here.
+      # typecheck and build are the checks that actually mean something here,
+      # plus unit tests for the pure engine code they cannot catch logic errors in.
       - run: npm run typecheck
       - run: npm run typecheck:scripts
+      - run: npm test
       - run: npm run build

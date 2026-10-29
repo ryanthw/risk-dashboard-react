@@ -8,6 +8,7 @@
     "build": "tsc -b && tsc -p tsconfig.scripts.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "snapshot": "tsx --tsconfig tsconfig.app.json scripts/snapshot.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "snapshot:local": "tsx --env-file=.env.local --tsconfig tsconfig.app.json scripts/snapshot.ts"
@@ -52,6 +53,7 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "vitest": "^4.1.12"
   }
 }
