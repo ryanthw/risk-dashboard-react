@@ -118,7 +118,10 @@ export default function PortfolioInsights() {
   if (!activePortfolioId) return <NoPortfolio />;
   if (isLoading) return <TableSkeleton rows={8} />;
 
-  if (!portfolio) {
+  // No research row means nothing has closed yet. With positions open that is
+  // still a page worth showing — every one of them lacks a track record, which
+  // is the insight — so only an empty portfolio gets the empty state.
+  if (!portfolio && open.length === 0) {
     return (
       <div className="space-y-5">
         <Card>
@@ -135,22 +138,31 @@ export default function PortfolioInsights() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-sm text-muted-foreground">
-          {portfolio.n_pnl} closed · {fmtPct((portfolio.win_rate ?? 0) * 100, 0)} win ·{" "}
-          <span className={pnlClass(portfolio.total_pnl ?? 0)}>
-            {fmtUsd(portfolio.total_pnl)}
-          </span>{" "}
-          realized
-          {portfolio.first_exit && (
-            <> · since {format(new Date(portfolio.first_exit), "MMM d, yyyy")}</>
-          )}
-        </p>
-        {/* Derived on a schedule, not live — say so rather than implying freshness. */}
-        <p className="mt-0.5 text-[0.7rem] text-muted-foreground/70">
-          Research as of {portfolio.as_of}. Open positions are live.
-        </p>
-      </div>
+      {portfolio ? (
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {portfolio.n_pnl} closed · {fmtPct((portfolio.win_rate ?? 0) * 100, 0)} win ·{" "}
+            <span className={pnlClass(portfolio.total_pnl ?? 0)}>
+              {fmtUsd(portfolio.total_pnl)}
+            </span>{" "}
+            realized
+            {portfolio.first_exit && (
+              <> · since {format(new Date(portfolio.first_exit), "MMM d, yyyy")}</>
+            )}
+          </p>
+          {/* Derived on a schedule, not live — say so rather than implying freshness. */}
+          <p className="mt-0.5 text-[0.7rem] text-muted-foreground/70">
+            Research as of {portfolio.as_of}. Open positions are live.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <p className="text-sm text-muted-foreground">No closed trades yet.</p>
+          <p className="mt-0.5 text-[0.7rem] text-muted-foreground/70">
+            Research covers closed trades only. Open positions are live.
+          </p>
+        </div>
+      )}
 
       {insights.length > 0 ? (
         <div className="grid gap-3 md:grid-cols-2">
